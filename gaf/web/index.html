@@ -1,0 +1,1705 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#17191A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Game Dev AI Tool">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<title>Game Dev AI Tool</title>
+<style>
+:root{color-scheme:dark;--u:1;--bg:#17191A;--side:#141617;--card:#1E2022;--line:#2B2E30;--edge:#3A3E41;--text:#ECEDEE;--soft:#C9CDD1;--muted:#9BA1A6;--bubble:#34383B;--hover:#222527;--pick:#282B2D;--need:#E5A23C;--bad:#E5484D;--work:#4A9EFF;--ok:#4CC38A;--off:#6B7176;--warn:#F0B45B;--focus:#8AB4FF;font-family:'Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;color:var(--text);background:var(--bg);font-size:calc(14px*var(--u));line-height:1.55}
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{overflow:hidden;background:var(--bg)}[hidden]{display:none!important}
+button,input,textarea,select{font:inherit;color:inherit}
+button{border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:var(--card);cursor:pointer;min-height:calc(34px*var(--u))}
+button:hover:not(:disabled){border-color:#4A4F53;background:var(--hover)}button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+input,textarea,select{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;min-height:36px;max-width:100%}
+a{color:var(--focus)}h1,h2,h3,p,dl{margin:0}h1,h2{font-size:calc(15px*var(--u))}h3{font-size:calc(14px*var(--u))}small,.muted{font-size:calc(12.5px*var(--u));color:var(--muted)}
+svg{width:calc(18px*var(--u));height:calc(18px*var(--u));flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}svg .f{fill:currentColor;stroke:none}
+code,pre{font-family:Consolas,'D2Coding',ui-monospace,monospace}
+pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;background:#111314;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 10px;max-height:42vh;overflow:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.primary{background:var(--text);border-color:var(--text);color:#111;font-weight:700}.primary:hover:not(:disabled){background:#fff;border-color:#fff}
+.link{border:0;background:none;color:var(--muted);padding:2px 4px;min-height:28px;text-decoration:underline}
+.icon-button{width:calc(34px*var(--u));height:calc(34px*var(--u));padding:0;display:inline-grid;place-items:center;border-color:transparent;background:none;color:var(--muted);flex:none}
+.icon-button:hover:not(:disabled){color:var(--text);border-color:transparent}
+.icon-button.on,.icon-button.on:hover:not(:disabled){color:var(--bad)}
+.icon-button.busy{opacity:.55}
+.message{color:var(--warn);white-space:pre-wrap;overflow-wrap:anywhere;font-size:calc(13px*var(--u))}.message:empty{display:none}.warn{color:var(--warn)}
+.need{color:var(--need)}.blocked{color:var(--bad)}.working,.waiting{color:var(--work)}.idle{color:var(--ok)}.off{color:var(--off)}
+.ring{width:14px;height:14px;border:1.5px solid currentColor;border-radius:50%;display:inline-grid;place-items:center;flex:none}.ring::after{content:"";width:4px;height:4px;border-radius:50%;background:currentColor}
+/* 세 칸: 세션 목록 · 대화 · 패널 */
+.app{display:grid;grid-template-columns:var(--side-w,280px) minmax(0,1fr) var(--panel-w,380px);height:100dvh}
+.side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0}
+.side-top{display:flex;align-items:center;gap:8px;padding:14px 10px 6px 18px;min-height:calc(52px*var(--u))}.side-top h1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-nav{padding:2px 8px 10px;border-bottom:1px solid var(--line);display:grid;gap:2px}
+.nav-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border-color:transparent;background:none;padding:6px 10px;color:var(--soft)}
+.side-list{flex:1;overflow:auto;padding:8px 8px 12px;min-height:0}
+.group{display:flex;align-items:center;gap:10px;padding:14px 10px 6px;font-size:calc(13px*var(--u))}.group span:last-child{color:var(--muted)}
+.row{display:flex;align-items:center;border-radius:10px;margin:1px 0}.row:hover{background:var(--hover)}.row.current{background:var(--pick)}
+.pick{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-align:left;border:0;background:none;padding:7px 4px 7px 10px;border-radius:10px;min-height:44px}.pick:hover:not(:disabled){background:none}
+.avatar{position:relative;width:calc(26px*var(--u));height:calc(26px*var(--u));border-radius:7px;display:grid;place-items:center;font-size:calc(13px*var(--u));font-weight:700;color:#111;flex:none}
+.dot{position:absolute;right:-4px;bottom:-4px;width:11px;height:11px;border-radius:50%;background:currentColor;border:2px solid var(--side)}.row.current .dot{border-color:var(--pick)}
+.dot.waiting{background:var(--side);box-shadow:inset 0 0 0 2px currentColor}.row.current .dot.waiting{background:var(--pick)}
+.row-text{min-width:0;display:grid}.role-name,.line{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.line{font-size:calc(12.5px*var(--u));color:var(--muted)}
+.more{margin-right:4px}
+#side-message{padding:0 18px 8px}
+.side-foot{display:flex;align-items:center;gap:8px;padding:8px 10px calc(10px + env(safe-area-inset-bottom)) 18px;border-top:1px solid var(--line)}
+.side-foot span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.bar,.panel-bar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);min-height:calc(52px*var(--u))}
+.bar-title{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;padding:0 6px}.bar-title h2{flex:none;max-width:60%}.bar-title h2,.bar-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+#side-open{position:relative}.badge{position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--need)}
+.notices{padding:0 16px;max-height:30dvh;overflow:auto}.notices:empty{display:none}
+.notice{color:var(--warn);background:#2A2114;border:1px solid #6B5320;border-radius:8px;padding:8px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+#chat{flex:1;min-height:0;overflow:auto;overflow-anchor:none;display:flex;flex-direction:column}
+.column{width:100%;max-width:calc(820px*var(--u));margin:0 auto;padding:0 20px}
+#chat .column{flex:none;margin-top:auto;display:flex;flex-direction:column;padding-top:18px;padding-bottom:8px}
+#older{align-self:center;margin-bottom:8px}.empty{color:var(--muted);text-align:center;padding:40px 0}
+/* 대화 줄: 내 말(말풍선) · 세션이 한 말(본문) · 받은 글(카드) · 도구 줄 · 턴의 끝 */
+.msg{margin:10px 0;min-width:0}.msg.user{display:flex;flex-direction:column;align-items:flex-end;margin:18px 0 12px}
+.msg.user .bubble{background:var(--bubble);border-radius:16px;padding:10px 14px;max-width:min(88%,calc(640px*var(--u)));white-space:pre-wrap;overflow-wrap:anywhere}
+.meta{font-size:calc(12px*var(--u));color:var(--muted)}.msg.user .meta{margin-top:4px}
+.sub{margin-left:8px;padding-left:12px;border-left:1px solid var(--line)}
+.prose{overflow-wrap:anywhere}.prose p{margin:0 0 10px;white-space:pre-wrap}.prose ul{margin:0 0 10px;padding-left:20px}.prose li{margin:3px 0}.prose .h{font-weight:700}
+.prose>:last-child{margin-bottom:0}.prose code{font-size:.92em;background:#26292B;border-radius:4px;padding:1px 5px}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:10px 14px}
+.card-head{display:flex;gap:10px;justify-content:space-between;font-size:calc(12px*var(--u));color:var(--muted);margin-bottom:4px}.card-title{font-weight:700;margin-bottom:4px;overflow-wrap:anywhere}
+.clamp{max-height:9.3em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 60%,transparent);mask-image:linear-gradient(#000 60%,transparent)}.clamp.open{max-height:none;-webkit-mask-image:none;mask-image:none}
+.tools{margin:6px 0}.tools>summary{display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--soft);list-style:none;padding:4px 0;border-radius:6px}
+.tools>summary::-webkit-details-marker{display:none}.tools[open]>summary svg{transform:rotate(90deg)}
+.tools-list{margin:2px 0 6px 8px;padding-left:14px;border-left:1px solid var(--line)}
+.tool{display:flex;align-items:center;gap:8px;color:var(--muted);padding:3px 0;min-width:0}.tool svg,.end svg{width:calc(15px*var(--u));height:calc(15px*var(--u))}
+.tool b{font-weight:400;color:var(--soft);flex:none}.tool span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.talk-rows>.tool{margin:6px 0}
+.end{display:flex;align-items:center;gap:8px;font-size:calc(12.5px*var(--u));color:var(--muted);margin:8px 0 20px}.end.bad,.note.error{color:#FF9A9E}
+.note{font-size:calc(12.5px*var(--u));color:var(--muted);margin:8px 0;overflow-wrap:anywhere;white-space:pre-wrap}.note.denied{color:var(--warn)}.note.system{text-align:center}
+.pictures{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.preview{padding:4px;background:var(--bg);min-height:0}.preview img{display:block;width:96px;height:76px;object-fit:contain;border-radius:6px}
+.file .bubble,.media{min-width:0;max-width:100%;width:100%;overflow-wrap:anywhere}.file p{white-space:pre-wrap;overflow-wrap:anywhere}
+video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height:50dvh}.media small{display:block;overflow-wrap:anywhere}
+.job-card{margin-bottom:10px;overflow-wrap:anywhere}.job-card .actions{justify-content:flex-start;flex-wrap:wrap}.job-command{white-space:pre-wrap;overflow-wrap:anywhere}.background-count{color:var(--work)}
+.action-list{max-height:18dvh;overflow:auto;overflow-wrap:anywhere}.decision-card>*{min-width:0}.decision-card pre{margin:0}.action-url{white-space:pre-wrap;overflow-wrap:anywhere}
+.live{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:calc(13px*var(--u));padding:6px 0 4px;min-width:0}.live span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.live-dots{display:flex;gap:3px;flex:none;color:var(--work)}.live-dots i{font-style:normal;animation:live-dots 1.4s infinite}.live-dots i:nth-child(2){animation-delay:.2s}.live-dots i:nth-child(3){animation-delay:.4s}
+.live.paused .live-dots i{animation-play-state:paused}.age{color:var(--muted);font-size:calc(12px*var(--u))}.age:empty{display:none}
+@keyframes live-dots{0%,80%,100%{opacity:.35}40%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.live-dots i{animation:none}}
+.dock{padding:6px 0 calc(12px + env(safe-area-inset-bottom))}
+#decisions{max-height:46dvh;overflow:auto;margin-bottom:8px}
+.decision-card{border:1px solid #6B5320;border-radius:14px;padding:14px;background:var(--card);display:grid;gap:12px;margin-bottom:8px}
+.question{display:grid;gap:8px}.question p{white-space:pre-wrap;overflow-wrap:anywhere}.question input{width:100%}
+.options{display:flex;flex-wrap:wrap;gap:8px}.option{text-align:left;display:flex;flex-direction:column;gap:2px;flex:1 1 150px;min-height:44px}.option[aria-pressed=true]{border-color:var(--need);background:#2A2114}
+.composer{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px 8px;display:grid;gap:6px}.composer.drag,.composer:focus-within{border-color:var(--focus)}
+#text{width:100%;border:0;background:none;resize:none;padding:4px;min-height:32px;max-height:40dvh;outline:none;display:block}
+.composer-row{display:flex;align-items:center;gap:8px;min-width:0}.composer-row .muted{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.round{width:calc(34px*var(--u));height:calc(34px*var(--u));padding:0;border-radius:50%;display:inline-grid;place-items:center;flex:none}
+.send{background:var(--text);border-color:var(--text);color:#111}.send:hover:not(:disabled){background:#fff;border-color:#fff}
+.stop{background:var(--bad);border-color:var(--bad);color:#fff}.stop:hover:not(:disabled){background:#F2555A;border-color:#F2555A}
+#attachments{display:flex;flex-wrap:wrap;gap:8px}#attachments:empty{display:none}.attachment{display:flex;align-items:center;gap:4px}.attachment img{width:64px;height:56px;object-fit:contain;border-radius:6px}
+#message{padding:6px 4px 0}
+.panel{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0}
+.tabs{display:flex;gap:4px;flex:1;min-width:0;overflow:auto}.tabs button{border-color:transparent;background:none;color:var(--muted);white-space:nowrap;padding:6px 9px}.tabs button[aria-selected=true]{background:var(--pick);color:var(--text)}
+.pane{flex:1;min-height:0;overflow:auto;padding:14px 16px}.pane pre{max-height:none;margin:0}#panel-error{padding:8px 16px 0}
+.now{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;margin-bottom:14px;font-size:calc(13px*var(--u))}.now dt{color:var(--muted)}.now dd{margin:0;overflow-wrap:anywhere}
+.task{border-bottom:1px solid var(--line);padding:6px 0}.task>button{width:100%;text-align:left;border-color:transparent;background:none;display:flex;gap:10px;justify-content:space-between;align-items:baseline}
+.task>button span:first-child{overflow-wrap:anywhere;min-width:0}.task>button span:last-child{flex:none}.task pre{margin:6px 0 4px}
+#artifacts a{overflow-wrap:anywhere;display:inline-flex;align-items:center;min-height:36px;padding:0 6px}
+/* 바뀐 코드: 파일마다 접는 줄 하나, 펼치면 차이(더한 줄 · 뺀 줄) */
+.changes-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}.changes-head span{flex:1;min-width:0;overflow-wrap:anywhere}
+.change{border-bottom:1px solid var(--line)}.change>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;padding:7px 2px;min-width:0}
+.change>summary::-webkit-details-marker{display:none}.change[open]>summary svg{transform:rotate(90deg)}
+.change .path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.change .path b{font-weight:400}
+.count{flex:none;font-size:calc(12.5px*var(--u));font-variant-numeric:tabular-nums}.plus{color:var(--ok)}.minus{color:#FF9A9E}
+.tag{flex:none;font-size:calc(11.5px*var(--u));border:1px solid currentColor;border-radius:4px;padding:0 5px}
+.diff{font-family:Consolas,'D2Coding',ui-monospace,monospace;font-size:calc(12.5px*var(--u));line-height:1.5;margin:2px 0 10px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#111314}
+.dl{display:grid;grid-template-columns:calc(42px*var(--u)) calc(14px*var(--u)) minmax(0,1fr);white-space:pre-wrap;overflow-wrap:anywhere}
+.dl .no{color:var(--off);text-align:right;padding-right:8px;user-select:none}.dl .sign{user-select:none}
+.dl.add{background:#14291E}.dl.del{background:#2E1A1C}.dl.hunk{color:var(--muted);background:#1A1C1E}
+.menu{position:fixed;z-index:20;width:calc(240px*var(--u));max-width:calc(100vw - 16px);background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:4px;display:grid;box-shadow:0 8px 24px #0008}
+.menu-item{border:0;background:none;text-align:left;padding:8px 12px;border-radius:6px}.menu-item.danger{color:#FF9A9E}
+dialog{color:var(--text);background:var(--card);border:1px solid var(--edge);border-radius:14px;width:min(calc(640px*var(--u)),95vw);max-width:95vw;max-height:92dvh;padding:0;overflow:hidden}dialog::backdrop{background:#0009}
+dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-items:center;gap:16px;padding:14px 20px;flex:none;border-bottom:1px solid var(--line)}.dialog-head button{margin-left:auto}
+.dialog-body{overflow:auto;min-height:0;padding:16px 20px;overscroll-behavior:contain}
+.role-layer{border-bottom:1px solid var(--edge);padding:12px 0;min-width:0}.role-layer .actions{justify-content:space-between}.role-layer pre{margin:8px 0}
+#custom-text{min-height:32dvh;resize:vertical}#custom-path{overflow-wrap:anywhere}
+.settings-row{padding:10px 0;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:center;gap:12px}.settings-row>div{flex:1;min-width:0;overflow-wrap:anywhere}
+.settings-row details{font-size:calc(12px*var(--u));min-width:0;max-width:100%;overflow-wrap:anywhere}.settings-row details[open]{flex-basis:100%}.settings-row>small{max-width:100%;overflow-wrap:anywhere}
+#settings h3{margin-top:18px}#settings-remote .message,#project-list a{overflow-wrap:anywhere}#project-list a{min-height:44px;display:inline-flex;align-items:center;padding:0 8px}
+#image-view{width:auto}#large-image{max-width:85vw;max-height:75dvh;display:block;object-fit:contain}
+.form{display:grid;gap:8px}.form label{font-size:calc(13px*var(--u));color:var(--muted);margin-top:6px}.form input,.form textarea,.form select{width:100%}.form textarea{resize:vertical;min-height:72px}
+.form summary{cursor:pointer;color:var(--muted);padding:8px 0}.form details>div{display:grid;gap:8px}.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+#no-key{padding:24px}.pair{max-width:calc(420px*var(--u));margin:12vh auto;padding:24px;display:grid;gap:14px}.pair h1{font-size:calc(18px*var(--u))}.pair input{font-size:calc(22px*var(--u));letter-spacing:2px;text-align:center}
+.phone-only{display:none}
+/* 넓은 화면: 글자 · 단추 · 줄 길이를 키운다(--u). 2560 폭 100% 배율 모니터에서 14px 글자가 작았다(11-15) */
+@media(min-width:1800px){:root{--u:1.08}}@media(min-width:2200px){:root{--u:1.2}}@media(min-width:3000px){:root{--u:1.4}}
+@media(min-width:900px){#side-message{display:none}.side{grid-column:1;grid-row:1}.main{grid-column:2;grid-row:1}.panel{grid-column:3;grid-row:1}.app{--side-w:clamp(250px,17vw,400px);--panel-w:clamp(340px,25vw,640px)}.app[data-tab=changes]:not([data-panel=off]){--panel-w:min(52vw,1200px)}.app[data-side=off]{--side-w:0px}.app[data-side=off] .side{display:none}.app[data-panel=off]{--panel-w:0px}.app[data-panel=off] .panel{display:none}}
+/* 폰: 목록 · 대화 · 패널 가운데 하나만 보인다 */
+@media(max-width:899px){:root{font-size:15px}.app{display:block}.side,.main,.panel{display:none;height:100dvh;border:0}
+.app[data-view=list] .side,.app[data-view=chat] .main,.app[data-view=panel] .panel{display:flex}
+.phone-only{display:inline-grid}.tabs{gap:2px}.tabs button{padding:6px 7px}.tabs .wide{display:none}.column{padding:0 14px}.bar-title{display:grid;gap:0}.bar-title h2{max-width:100%}.side-list{padding-bottom:20px}}
+@media(max-width:899px),(pointer:coarse){button,.link,.tools>summary,input,select{min-height:44px}button{min-width:44px}.icon-button,.round{width:44px;height:44px}.tools>summary{padding:0}#text{min-height:44px;padding:10px 4px}.change>summary{min-height:44px}}
+</style>
+</head>
+<body>
+<template id="icons">
+<svg data-icon="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+<svg data-icon="folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
+<svg data-icon="sliders" viewBox="0 0 24 24"><path d="M4 8h9.5M18.5 8H20M4 16h1.5M10.5 16H20"/><circle cx="16" cy="8" r="2.5"/><circle cx="8" cy="16" r="2.5"/></svg>
+<svg data-icon="side" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15"/></svg>
+<svg data-icon="panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg>
+<svg data-icon="dots" viewBox="0 0 24 24"><circle class="f" cx="12" cy="5.5" r="1.5"/><circle class="f" cx="12" cy="12" r="1.5"/><circle class="f" cx="12" cy="18.5" r="1.5"/></svg>
+<svg data-icon="up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+<svg data-icon="stop" viewBox="0 0 24 24"><rect class="f" x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+<svg data-icon="image" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.5"/><path d="M20.5 15.5 16 11l-8 8"/></svg>
+<svg data-icon="close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+<svg data-icon="chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+<svg data-icon="eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.5"/></svg>
+<svg data-icon="pencil" viewBox="0 0 24 24"><path d="M4 20l1-4.5L16.5 4 20 7.5 8.5 19z"/></svg>
+<svg data-icon="terminal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M7.5 10l3 2-3 2M13 14.5h3.5"/></svg>
+<svg data-icon="arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+<svg data-icon="diamond" viewBox="0 0 24 24"><path d="M12 4.5 19.5 12 12 19.5 4.5 12z"/></svg>
+<svg data-icon="check" viewBox="0 0 24 24"><path d="M5 12.5 9.5 17 19 7.5"/></svg>
+<svg data-icon="refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5V9H15"/></svg>
+<svg data-icon="alert" viewBox="0 0 24 24"><path d="M12 4.5l9 15H3z"/><path d="M12 10.5v4M12 17.2v.3"/></svg>
+<svg data-icon="mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>
+</template>
+<p id="no-key" hidden>터미널에서 python -m gaf open 으로 다시 연다(찍힌 주소에 접근 값이 들어 있다)</p>
+<form id="pair" class="pair" hidden><h1>기기 등록</h1><p>PC 화면의 「설정 → 원격 기기 → 기기 등록」에 나온 코드를 넣는다. 처음 한 번만 한다.</p><label for="pair-code">등록 코드</label><input id="pair-code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="1234-5678"><button class="primary" type="submit">등록</button><p id="pair-message" class="message" role="status"></p></form>
+<div id="app" class="app" data-view="chat" hidden>
+<nav id="side" class="side" aria-label="세션 목록">
+<div class="side-top"><h1 id="project">Game Dev AI Tool</h1><button id="side-close" type="button" class="icon-button phone-only" aria-label="목록 닫기" data-icon="close"></button></div>
+<div class="side-nav"><button id="role-new-open" type="button" class="nav-row" data-icon="plus">새 역할</button><button id="projects-open" type="button" class="nav-row" data-icon="folder">프로젝트</button></div>
+<div id="roles" class="side-list"></div>
+<p id="side-message" class="message" role="status"></p>
+<div class="side-foot"><span id="limits" class="muted"></span><button id="settings-open" type="button" class="icon-button" aria-label="설정" data-icon="sliders"></button></div>
+</nav>
+<section id="main" class="main" aria-label="고른 세션의 대화">
+<header class="bar"><button id="side-open" type="button" class="icon-button" aria-label="세션 목록" data-icon="side"><span id="side-badge" class="badge" hidden></span></button><div class="bar-title"><h2 id="chat-title"></h2><span id="chat-sub" class="muted"></span></div><button id="session-more" type="button" class="icon-button" aria-label="세션 메뉴" aria-haspopup="menu" data-icon="dots"></button><button id="panel-open" type="button" class="icon-button" aria-label="일 · 결과물 · 바뀐 코드 · 인계 · 역할 글" data-icon="panel"></button></header>
+<div id="notices" class="notices"></div>
+<div id="chat" role="log" aria-label="대화" tabindex="0"><div class="column"><button id="older" type="button" class="link" hidden>앞의 대화 더 보기</button><p id="empty" class="empty" hidden></p><div id="rows"></div></div></div>
+<div class="dock"><div class="column">
+<section id="decisions" hidden aria-label="내가 정할 것"><div id="decision-list"></div></section>
+<div id="live" class="live" hidden><span class="live-dots" aria-hidden="true"><i>•</i><i>•</i><i>•</i></span><span id="live-text"></span></div>
+<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></form>
+<p id="message" class="message" role="status"></p>
+</div></div>
+</section>
+<aside id="panel" class="panel" aria-label="고른 세션의 일 · 결과물 · 바뀐 코드 · 인계 · 역할 글">
+<div class="panel-bar"><div class="tabs" role="tablist" aria-label="세션 정보"><button id="tab-tasks" type="button" role="tab" aria-controls="pane-tasks" aria-selected="true">일</button><button id="tab-artifacts" type="button" role="tab" aria-controls="pane-artifacts" aria-selected="false" tabindex="-1">결과물</button><button id="tab-changes" type="button" role="tab" aria-controls="pane-changes" aria-selected="false" tabindex="-1"><span class="wide">바뀐 </span>코드</button><button id="tab-handoff" type="button" role="tab" aria-controls="pane-handoff" aria-selected="false" tabindex="-1">인계</button><button id="tab-role" type="button" role="tab" aria-controls="pane-role" aria-selected="false" tabindex="-1">역할<span class="wide"> 글</span></button></div><button id="panel-close" type="button" class="icon-button" aria-label="패널 닫기" data-icon="close"></button></div>
+<p id="panel-error" class="message" role="status"></p>
+<div id="pane-tasks" class="pane" role="tabpanel" aria-labelledby="tab-tasks"><dl id="now" class="now"></dl><div id="tasks"><div id="jobs"></div><div id="task-list"></div></div></div>
+<div id="pane-artifacts" class="pane" role="tabpanel" aria-labelledby="tab-artifacts" hidden><div id="artifacts" class="pictures"></div></div>
+<div id="pane-changes" class="pane" role="tabpanel" aria-labelledby="tab-changes" hidden><div class="changes-head"><span id="changes-summary" class="muted"></span><button id="changes-refresh" type="button" class="icon-button" aria-label="바뀐 코드 새로 고침" data-icon="refresh"></button></div><p id="changes-error" class="message" role="status"></p><div id="changes"></div></div>
+<div id="pane-handoff" class="pane" role="tabpanel" aria-labelledby="tab-handoff" hidden><pre id="handoff"></pre></div>
+<div id="pane-role" class="pane" role="tabpanel" aria-labelledby="tab-role" hidden><div id="role-text"></div></div>
+</aside>
+</div>
+<div id="menu" class="menu" role="menu" hidden></div>
+<dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
+<dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
+<dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div></div></dialog>
+<dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
+<dialog id="image-view" aria-label="그림 크게 보기"><div class="dialog-head"><span>그림</span><button type="button" data-close="image-view">닫기</button></div><div class="dialog-body"><img id="large-image" alt="크게 보는 그림"></div></dialog>
+<dialog id="job-output" aria-labelledby="job-title"><div class="dialog-head"><h2 id="job-title">배경 일 출력</h2><button type="button" data-close="job-output">닫기</button></div><div class="dialog-body"><pre id="job-text"></pre><button id="job-reload" type="button">새로 읽기</button><p id="job-error" class="message" role="status"></p></div></dialog>
+<script>
+'use strict';
+(() => {
+const $ = id => document.getElementById(id);
+let key = new URLSearchParams(location.search).get('k');
+// 접근 값을 탭 안에만 두고 주소창 · 방문 기록에서는 지운다(저장이 막힌 브라우저에서는 주소에 그대로 둔다 — 새로 고침이 되게).
+try { if (key) { sessionStorage.setItem('gaf-key', key); history.replaceState(null, '', location.pathname); } else key = sessionStorage.getItem('gaf-key'); } catch (_) {}
+// 접근 값 없이 열렸으면(사설망을 거쳐 온 폰 · 다른 PC) 등록한 기기의 쿠키로 들어간다 — 맨 아래 begin 이 가린다.
+const app = $('app'), phone = matchMedia('(max-width:899px)'), touch = matchMedia('(pointer:coarse)');
+let state = null, source = null, stateTimer = null, stateBusy = false, stateDirty = false, talkDirty = false, visibilityVersion = 0;
+let selected = null, followChat = true, olderBusy = false, sending = false, composing = false, attachments = [];
+let detailVersion = 0, detailSignature = '', detailSandbox = [], detailBusy = false, detailDirty = false, noticeSignature = '', settingsSignature = '', remoteVersion = 0, projectsVersion = 0, menuAnchor = null;
+let customEdit = null, customSaving = false;
+let changesVersion = 0, changesBusy = false, changesDirty = false;
+let jobTimer = null, jobsAt = performance.now(), outputJob = null, outputVersion = 0;
+let connectionLost = false, clockPausedAt = null;
+let programArmed = false, programStopped = false;
+let appPrompt = null, appInstalled = false;
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault(); appPrompt = event;
+  if ($('settings').open) showApp();
+});
+window.addEventListener('appinstalled', () => {
+  appInstalled = true; appPrompt = null;
+  if ($('settings').open) showApp();
+});
+const jobNodes = new Map();
+// 고른 세션의 대화: 줄 상자와 그리는 흐름을 역할마다 쥔다. version 은 바꿀 때마다 올려 늦게 온 답을 버린다.
+let talk = {version:0, first:0, last:0, shown:0, busy:null, dirty:false, stream:null, box:null}, talkVersion = 0, talkEventSeq = null;
+const talks = new Map();
+const TALK_PAGE = {rowHeight:28, overscan:1.5, min:30, max:120, olderMax:200, fillMax:5, slack:10};
+const drafts = new Map(), roleNodes = new Map(), groupNodes = new Map(), decisionNodes = new Map(), taskNodes = new Map(), changeNodes = new Map();
+const HUMAN = '사용자';
+const statusWords = {need:'내 확인 필요',blocked:'막힘',working:'일하는 중',waiting:'기다림',idle:'쉼',off:'꺼짐'};
+const groupOrder = ['need','blocked','working','idle','off'];
+const taskWords = {queued:'줄에 있음',running:'하는 중',done:'끝',problem:'문제 있음',blocked:'막힘',stopped:'멈춤',interrupted:'중단'};
+const toolWords = {read:'읽기',edit:'고침',shell:'명령',team:'팀 명령',other:'도구'};
+const toolIcons = {read:'eye',edit:'pencil',shell:'terminal',team:'arrow',other:'diamond'};
+const tabs = ['tasks','artifacts','changes','handoff','role'];
+function node(tag, text, className) { const n = document.createElement(tag); if (text != null) n.textContent = text; if (className) n.className = className; return n; }
+// 아이콘은 위 <template> 에 그려 둔 것을 베껴 쓴다(바깥 주소 없이).
+function icon(name) { const n = $('icons').content.querySelector('[data-icon="' + name + '"]').cloneNode(true); n.removeAttribute('data-icon'); n.setAttribute('aria-hidden','true'); return n; }
+function button(text, action, className) { const b = node('button', text, className); b.type = 'button'; b.addEventListener('click', action); return b; }
+function message(text) { if (programStopped) text = '꺼졌다. 다시 켜려면 바탕화면 아이콘을 더블클릭한다.'; $('message').textContent = text || ''; $('side-message').textContent = text || ''; }
+document.querySelectorAll('[data-icon]').forEach(n => { n.prepend(icon(n.dataset.icon)); if (n.getAttribute('aria-label')) n.title = n.getAttribute('aria-label'); });
+async function api(path, data) {
+  const headers = key ? {'X-GAF-Key':key} : {};
+  const options = {headers, cache:'no-store'};
+  if (data !== undefined) { headers['Content-Type'] = 'application/json'; options.method = 'POST'; options.body = JSON.stringify(data); }
+  let response, result;
+  try { response = await fetch(path, options); result = await response.json(); }
+  catch (_) { throw new Error('서버에 연결하지 못했다'); }
+  if (!response.ok || result.ok === false) {
+    const error = new Error(result.error || '요청을 마치지 못했다');
+    if (Array.isArray(result.lines)) error.lines = result.lines;
+    throw error;
+  }
+  return result;
+}
+async function act(path, data, errorTarget) {
+  const show = text => { if (errorTarget) $(errorTarget).textContent = text; else message(text); };
+  try {
+    await api(path, data);
+    if (path === '/api/role' && ['reset','off','on'].includes(data.action)) forgetTalk(data.name);
+    show(''); scheduleState(); return true;
+  }
+  catch (error) { show(error.message); return false; }
+}
+function fileURL(path) { return '/api/file?path=' + encodeURIComponent(path) + (key ? '&k=' + encodeURIComponent(key) : ''); }
+function picture(path) {
+  const b = button('', () => { $('large-image').src = fileURL(path); $('image-view').showModal(); }, 'preview');
+  b.setAttribute('aria-label', '그림 크게 보기: ' + path);
+  const img = node('img'); img.alt = path.split('/').pop(); img.loading = 'lazy'; img.src = fileURL(path); b.append(img); return b;
+}
+function player(kind, path) {
+  const view = kind === 'video' ? node('video') : node('audio');
+  view.controls = true; view.preload = kind === 'video' ? 'metadata' : 'none';
+  if (kind === 'video') view.setAttribute('playsinline', '');
+  view.src = fileURL(path); return view;
+}
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
+$('custom-form').addEventListener('submit', event => { event.preventDefault(); saveCustom(); });
+$('custom-close').addEventListener('click', () => { if (!customSaving) $('custom-edit').close(); });
+$('custom-edit').addEventListener('cancel', event => { if (customSaving) event.preventDefault(); });
+$('image-view').addEventListener('close', () => { if (!$('image-view').open) $('large-image').removeAttribute('src'); });     // 늦게 온 닫힘은 다시 연 창을 비우지 않는다(resetSettings)
+const timeFormat = new Intl.DateTimeFormat('ko-KR', {hour:'numeric', minute:'2-digit'}), dayFormat = new Intl.DateTimeFormat('ko-KR', {month:'numeric', day:'numeric'});
+function when(ts) {
+  const moment = new Date(ts); if (isNaN(moment)) return '';
+  return (moment.toDateString() === new Date().toDateString() ? '' : dayFormat.format(moment) + ' ') + timeFormat.format(moment);
+}
+function duration(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0)), m = Math.floor(s / 60);
+  if (s < 60) return s + '초';
+  if (m < 60) return m + '분' + (s % 60 ? ' ' + (s % 60) + '초' : '');
+  return Math.floor(m / 60) + '시간' + (m % 60 ? ' ' + (m % 60) + '분' : '');
+}
+// ── 글을 본문으로(마크다운의 일부만: 문단 · 「-」 목록 · 제목 줄 · 코드 블록 · `코드` · **굵게**). DOM 만 만든다.
+function inline(target, text) {
+  const pattern = /`[^`\n]+`|\*\*[^*\n]+\*\*/g; let last = 0, found;
+  while ((found = pattern.exec(text))) {
+    if (found.index > last) target.append(text.slice(last, found.index));
+    const token = found[0];
+    target.append(token[0] === '`' ? node('code', token.slice(1, -1)) : node('strong', token.slice(2, -2)));
+    last = found.index + token.length;
+  }
+  if (last < text.length) target.append(text.slice(last));
+}
+function prose(text) {
+  const box = node('div', null, 'prose'); let paragraph = [], list = null, fence = null;
+  const flush = () => { if (paragraph.length) { const p = node('p'); inline(p, paragraph.join('\n')); box.append(p); paragraph = []; } };
+  for (const line of String(text).replace(/\r/g, '').split('\n')) {
+    if (fence) { if (/^\s*```/.test(line)) { box.append(node('pre', fence.join('\n'))); fence = null; } else fence.push(line); continue; }
+    if (/^\s*```/.test(line)) { flush(); list = null; fence = []; continue; }
+    const item = /^\s*[-*•]\s+(.*)$/.exec(line), head = /^#{1,4}\s+(.*)$/.exec(line);
+    if (item) { flush(); if (!list) { list = node('ul'); box.append(list); } const li = node('li'); inline(li, item[1]); list.append(li); continue; }
+    list = null;
+    if (head) { flush(); const h = node('p', null, 'h'); inline(h, head[1]); box.append(h); }
+    else if (!line.trim()) flush();
+    else paragraph.push(line);
+  }
+  if (fence) box.append(node('pre', fence.join('\n')));
+  flush(); return box;
+}
+// 긴 글은 접어 두고 「펼치기」로 연다.
+function folded(content, text) {
+  if (text.length < 500 && text.split('\n').length < 9) return [content];
+  const wrap = node('div', null, 'clamp'); wrap.append(content);
+  const toggle = button('펼치기', () => { const open = wrap.classList.toggle('open'); toggle.textContent = open ? '접기' : '펼치기'; toggle.setAttribute('aria-expanded', String(open)); }, 'link');
+  toggle.setAttribute('aria-expanded','false'); return [wrap, toggle];
+}
+// ── 대화 줄 그리기 ───────────────────────────────────────────────────────────
+function toolKind(name) {
+  const n = String(name || '').replace(/^mcp__gaf__/, '').toLowerCase();
+  if (/^(read|glob|grep|ls|notebookread|webfetch|websearch|toolsearch)$/.test(n)) return 'read';
+  if (/^(write|edit|multiedit|notebookedit|apply_patch|patch)$/.test(n)) return 'edit';
+  if (/^(bash|powershell|shell|exec|exec_command|local_shell|command)$/.test(n)) return 'shell';
+  if (/^(team|assign|tell|send|sendmessage|result|ask|stop|new_role|role_off|reset_role)$/.test(n)) return 'team';
+  return 'other';
+}
+function toolLine(row) {
+  const line = node('div', null, 'tool' + (row.sub ? ' sub' : '')), name = String(row.name || '도구').replace(/^mcp__gaf__/, ''), raw = String(row.target || '');
+  const target = raw.startsWith(name + ' ') ? raw.slice(name.length + 1) : raw;          // 이름이 앞에 또 붙어 온 것은 한 번만 보인다
+  line.append(icon(toolIcons[toolKind(row.name)]), node('b', name), node('span', target)); line.title = target; return line;
+}
+function chatPictures(paths) {
+  const box = node('div', null, 'pictures');
+  for (const path of paths) { const view = picture(path); view.firstChild.addEventListener('load', () => { if (followChat) scrollBottom(); }); box.append(view); }
+  return box;
+}
+function receivedRow(row) {
+  const mine = row.from === HUMAN, images = row.images && row.images.length ? row.images : null;
+  if (mine && row.what !== 'task') {                                   // 내가 한 말 — 오른쪽 말풍선
+    const box = node('div', null, 'msg user'); box.append(node('div', row.text || '', 'bubble'));
+    if (images) box.append(chatPictures(images));
+    box.append(node('div', when(row.ts), 'meta')); return box;
+  }
+  // 다른 세션 · 지휘자가 보낸 글과 맡은 일 — 보낸 이가 붙은 카드
+  const card = node('div', null, 'msg card'), head = node('div', null, 'card-head');
+  head.append(node('span', (row.what === 'task' ? '일' : row.what === 'reply' ? '답' : '글') + ' · ' + (mine ? '나' : row.from || '')), node('span', when(row.ts)));
+  card.append(head); if (row.title) card.append(node('div', row.title, 'card-title'));
+  card.append(...folded(prose(row.text || ''), row.text || ''));
+  if (images) card.append(chatPictures(images));
+  return card;
+}
+function plainRow(row, lastError) {
+  if (row.kind === 'in') return receivedRow(row);
+  if (row.kind === 'file') {
+    const box = node('div', null, 'msg agent file'), bubble = node('div', null, 'bubble');
+    if (row.media === 'image') bubble.append(picture(row.path));
+    else if (row.media === 'video' || row.media === 'audio') bubble.append(player(row.media, row.path));
+    else { const link = node('a', '새 탭에서 열기'); link.href = fileURL(row.path); link.target = '_blank'; link.rel = 'noopener noreferrer'; bubble.append(link); }
+    bubble.append(node('small', row.name)); if (row.text) bubble.append(node('p', row.text));
+    box.append(bubble); return box;
+  }
+  if (row.kind === 'text') { const box = node('div', null, 'msg agent' + (row.sub ? ' sub' : '')), bubble = node('div', null, 'bubble'); bubble.append(prose(row.text || '')); box.append(bubble); return box; }
+  if (row.kind === 'end') {
+    const box = node('div', null, 'end' + (row.ok ? '' : ' bad'));
+    const text = row.ok ? duration(row.seconds) + ' 일함' : '끝까지 못 감' + (row.error && row.error !== lastError ? ' · ' + row.error : '') + ' · ' + duration(row.seconds);
+    box.append(icon(row.ok ? 'check' : 'alert'), node('span', text), node('span', when(row.ts), 'meta')); return box;
+  }
+  if (row.kind === 'error') return node('div', '오류 · ' + (row.text || ''), 'note error');
+  if (row.kind === 'denied') return node('div', '문이 막았다 · ' + (row.tool || '') + ' — ' + (row.text || ''), 'note denied');
+  if (row.kind === 'system') return node('div', row.text || '', 'note system');
+  return null;
+}
+// 줄을 차례로 받아 box 에 그린다. 이어진 도구 줄은 하나의 접는 묶음이 된다(하나뿐이면 그냥 한 줄).
+function showGroup(group) {
+  group.root.gafRows = group.rows; group.root.gafFirst = group.list.firstElementChild.gafFirst;
+  group.text.textContent = [...group.counts].filter(([,count]) => count).map(([name,count]) => toolWords[name] + ' ' + count).join(' · ') + (group.now ? ' — 지금: ' + group.now : '');
+}
+function updateToolNow(role) {
+  if (!talk.box) return;
+  const last = talk.box.lastElementChild, active = last && last.gafGroup;
+  if (talk.liveGroup && talk.liveGroup !== active) { talk.liveGroup.now = ''; showGroup(talk.liveGroup); }
+  talk.liveGroup = active;
+  if (active) {
+    const now = role && role.phase === 'tool' ? role.phase_text.replace(' — ', ' ') : '';
+    if (active.now !== now) { active.now = now; showGroup(active); }
+  }
+}
+function makeStream(box) {
+  let group = null, lastError = '';
+  return {add(row) {
+    if (row.kind === 'tool') {
+      const line = toolLine(row), kind = toolKind(row.name);
+      line.gafFirst = row.n; line.gafRows = 1; line.gafKind = kind;
+      if (!group) { group = {root:line, list:null, text:null, counts:new Map([[kind, 1]]), rows:1}; box.append(line); return; }
+      if (!group.list) {
+        const details = node('details', null, 'tools'), summary = node('summary'), text = node('span'), list = node('div', null, 'tools-list');
+        summary.append(icon('chevron'), text); details.append(summary, list); details.gafFirst = group.root.gafFirst;
+        group.root.replaceWith(details); list.append(group.root); group.root = details; group.list = list; group.text = text;
+        details.gafGroup = group;
+      }
+      group.list.append(line); group.rows++; group.counts.set(kind, (group.counts.get(kind) || 0) + 1); showGroup(group);
+      return;
+    }
+    group = null;
+    if (row.kind === 'error') lastError = row.text || '';
+    const element = plainRow(row, lastError);
+    if (row.kind === 'end') lastError = '';
+    if (element) { element.gafFirst = row.n; element.gafRows = 1; box.append(element); }
+  }};
+}
+function scrollBottom() { const chat = $('chat'); chat.scrollTop = chat.scrollHeight; talk.top = chat.scrollTop; }
+function talkLimit() { return Math.max(TALK_PAGE.min, Math.min(TALK_PAGE.max, Math.ceil($('chat').clientHeight / TALK_PAGE.rowHeight * TALK_PAGE.overscan))); }
+function clearRows() { talk.box.replaceChildren(); talk.first = talk.last = talk.shown = 0; talk.stream = makeStream(talk.box); }
+function openTalk() {
+  if (talk.box) trimRows();
+  talk.version = ++talkVersion; talk.busy = null; talk.dirty = false;
+  talk = talks.get(selected) || {first:0,last:0,shown:0,box:node('div',null,'talk-rows'),stream:null,off:!!(current() || {}).off};
+  talk.version = ++talkVersion; talk.busy = null; talk.dirty = false;
+  if (!talk.stream) talk.stream = makeStream(talk.box);
+  talk.fillLeft = TALK_PAGE.fillMax; talk.filling = false;
+  talks.delete(selected); if (selected && current()) talks.set(selected, talk);
+  while (talks.size > 8) talks.delete(talks.keys().next().value);
+  $('rows').replaceChildren(talk.box); olderBusy = false; followChat = true;
+  if (talk.last) showEdges(); else { $('older').hidden = true; $('empty').hidden = true; }
+  scrollBottom();
+  queueMicrotask(fillTalk);
+}
+function resetTalk() { talks.delete(selected); openTalk(); }
+function forgetTalk(name) { talks.delete(name); if (name === selected) { resetTalk(); talkDirty = true; } }
+function trimRows() {            // 맨 아래를 볼 때 · 역할을 떠날 때 위쪽을 덜어 낸다(「앞의 대화 더 보기」로 다시 읽는다)
+  const rows = talk.box; if (talk.shown <= 3000) return;
+  while (rows.children.length > 1 && talk.shown - (rows.firstElementChild.gafRows || 1) >= 2000) { talk.shown -= rows.firstElementChild.gafRows || 1; rows.firstElementChild.remove(); }
+  const group = rows.firstElementChild.gafGroup;
+  if (group) {                 // 도구 묶음 하나가 한도보다 커도 끝 쪽 줄과 묶는 상태는 남긴다
+    while (talk.shown > 2000 && group.rows > 1) {
+      const line = group.list.firstElementChild;
+      group.counts.set(line.gafKind, group.counts.get(line.gafKind) - 1); line.remove(); group.rows--; talk.shown--;
+    }
+    showGroup(group);
+  }
+  talk.first = rows.firstElementChild.gafFirst || talk.first;
+}
+function showEdges() {
+  const role = current();
+  $('older').hidden = talk.first <= 1; $('empty').hidden = talk.last > 0;
+  if (!talk.last && role) $('empty').textContent = role.lead ? '아래에 맡길 일을 적는다. ' + role.name + ' 세션이 역할들에게 나눠 맡긴다' : '아직 주고받은 글이 없다';
+}
+async function receiveTalk() {
+  if (!selected) return;
+  talk.dirty = true;
+  if (talk.busy) return talk.busy;
+  const version = talk.version, name = selected;
+  const work = (async () => {
+    while (talk.dirty && version === talk.version) {
+      talk.dirty = false;
+      const result = await api('/api/talk?role=' + encodeURIComponent(name) + '&limit=' + talkLimit() + (talk.last ? '&after=' + talk.last : ''));
+      if (version !== talk.version) return;
+      const rows = result.rows.filter(row => row.n > talk.last), follow = followChat;
+      if (rows.length) {
+        if (talk.last && rows[0].n > talk.last + 1) clearRows();      // 사이가 벌어졌다(오래 떠나 있었다) — 끝 쪽부터 다시 그린다
+        if (!talk.first) talk.first = rows[0].n;
+        for (const row of rows) talk.stream.add(row);
+        talk.last = rows[rows.length - 1].n; talk.shown += rows.length;
+        if (follow) trimRows();
+      }
+      showEdges(); updateToolNow(current()); if (follow) scrollBottom();
+    }
+  })();
+  talk.busy = work;
+  try { await work; } finally { if (talk.busy === work) { talk.busy = null; fillTalk(); } }
+}
+async function fillTalk() {       // 도구 묶음 때문에 화면이 덜 찼으면 앞쪽을 조금씩 더 받는다
+  if (talk.filling || talk.busy || olderBusy) return;
+  const version = talk.version, chat = $('chat'); talk.filling = true;
+  try {
+    while (version === talk.version && talk.fillLeft > 0 && !talk.busy && !document.hidden
+           && chat.clientHeight > 0 && chat.scrollHeight <= chat.clientHeight + TALK_PAGE.slack
+           && talk.first > 1 && !$('older').hidden) {
+      talk.fillLeft--;
+      if (!await loadOlder()) { if (version === talk.version) talk.fillLeft = 0; break; }
+      if (version === talk.version && followChat) scrollBottom();
+    }
+  } finally { if (version === talk.version) talk.filling = false; }
+}
+async function loadOlder() {
+  if (olderBusy || talk.first <= 1 || !selected) return;
+  olderBusy = true; const version = talk.version, first = talk.first;
+  try {
+    const result = await api('/api/talk?role=' + encodeURIComponent(selected) + '&before=' + talk.first + '&limit=' + Math.min(TALK_PAGE.olderMax, talkLimit() * 2));
+    if (version !== talk.version || first !== talk.first) return;
+    if (!result.rows.length) { $('older').hidden = true; return; }          // 더 옛 줄은 남아 있지 않다
+    const chat = $('chat'), height = chat.scrollHeight, top = chat.scrollTop, fragment = document.createDocumentFragment(), stream = makeStream(fragment);
+    for (const row of result.rows) stream.add(row);
+    talk.box.prepend(fragment); talk.first = result.rows[0].n; talk.shown += result.rows.length;
+    chat.scrollTop = top + chat.scrollHeight - height; talk.top = chat.scrollTop; $('older').hidden = talk.first <= 1;
+    return true;
+  } catch (error) { message(error.message); }
+  finally { if (version === talk.version) olderBusy = false; }
+}
+$('older').addEventListener('click', loadOlder);
+$('chat').addEventListener('scroll', () => {
+  const chat = $('chat'), up = chat.scrollTop < talk.top; talk.top = chat.scrollTop;
+  followChat = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 64;
+  if (up && chat.scrollTop < 120 && !$('older').hidden) loadOlder();
+});
+new ResizeObserver(() => { if (followChat) scrollBottom(); }).observe($('chat'));       // 입력칸 · 정할 것이 커지면 맨 아래를 따라간다
+// ── 세션 목록 ────────────────────────────────────────────────────────────────
+function current() { return state && state.roles.find(r => r.name === selected) || null; }
+function switchedText(role) { return role.switched ? ({codex:'GPT',claude:'Claude'}[role.engine] || role.engine) + ' 로 바꿈 — ' + role.switched.reason : ''; }
+function pendingNames() { return new Set(state.decisions.map(d => d.from)); }
+function statusOf(role, pending) { return pending.has(role.name) ? 'need' : statusWords[role.status] ? role.status : 'idle'; }
+function rowLine(role, status) {
+  if (status === 'need') { const asked = state.decisions.find(d => d.from === role.name); return asked && asked.questions[0] ? asked.questions[0].question : '내 답을 기다린다'; }
+  if (role.status === 'off') return '꺼 둔 역할';
+  if (role.status === 'waiting') return role.reason || '';
+  if (role.status === 'working') return (role.task && role.task.title) || role.now || '';
+  if (role.reason) return role.reason;
+  return role.last && role.last.title ? role.last.title : role.lead ? '맡길 일을 기다린다' : '맡은 일이 없다';
+}
+function avatarColor(name) { let hue = 0; for (const letter of name) hue = (hue * 31 + letter.codePointAt(0)) % 360; return 'hsl(' + hue + ' 45% 68%)'; }
+function makeRow(role) {
+  const row = node('div', null, 'row'), pick = button('', () => select(role.name), 'pick');
+  const avatar = node('span', [...role.name][0] || '?', 'avatar'), dot = node('span', null, 'dot');
+  avatar.style.background = role.lead ? '#ECEDEE' : avatarColor(role.name); avatar.append(dot);
+  const text = node('span', null, 'row-text'), line = node('span', '', 'line'); text.append(node('span', role.name, 'role-name'), line); pick.append(avatar, text);
+  const more = button('', () => toggleMenu(more, role.name), 'icon-button more'); more.append(icon('dots'));
+  more.setAttribute('aria-label', role.name + ' 메뉴'); more.setAttribute('aria-haspopup','menu'); row.append(pick, more);
+  const background = node('small', '', 'background-count'); background.hidden = true; text.append(background);
+  const switched = node('small', '', 'muted'); text.append(switched);
+  const age = node('small', '', 'age'); text.append(age);
+  const view = {row, pick, dot, line, background, switched, age}; roleNodes.set(role.name, view); return view;
+}
+function groupHead(group) {
+  let head = groupNodes.get(group);
+  if (!head) { head = node('div', null, 'group'); head.append(node('span', null, 'ring ' + group), node('span', statusWords[group])); groupNodes.set(group, head); }
+  return head;
+}
+function updateRoles() {
+  const pending = pendingNames(), box = $('roles'), wanted = [], grouped = new Map(groupOrder.map(group => [group, []]));
+  const names = new Set(state.roles.map(r => r.name)); let elsewhere = 0;
+  for (const [name, view] of roleNodes) if (!names.has(name)) { view.row.remove(); roleNodes.delete(name); }
+  for (const role of state.roles) {
+    const view = roleNodes.get(role.name) || makeRow(role), status = statusOf(role, pending), line = rowLine(role, status);
+    view.dot.className = 'dot ' + status; view.line.textContent = line;
+    const count = (state.jobs || []).filter(job => job.role === role.name && job.status === 'running').length;
+    view.background.hidden = count === 0; view.background.textContent = count ? '배경 일 ' + count : '';
+    view.switched.hidden = !(view.switched.textContent = switchedText(role));
+    view.pick.title = role.name + ' · ' + statusWords[status] + (line ? ' · ' + line : '');
+    view.row.classList.toggle('current', role.name === selected);
+    if (role.name === selected) view.pick.setAttribute('aria-current','true'); else view.pick.removeAttribute('aria-current');
+    if (role.lead) wanted.push(view.row); else grouped.get(status === 'waiting' ? 'working' : status).push(view.row);       // 총괄은 늘 맨 위
+    if (status === 'need' && role.name !== selected) elsewhere++;
+  }
+  for (const group of groupOrder) if (grouped.get(group).length) wanted.push(groupHead(group), ...grouped.get(group));
+  const focused = document.activeElement;
+  wanted.forEach((element, index) => { if (box.children[index] !== element) box.insertBefore(element, box.children[index] || null); });
+  while (box.children.length > wanted.length) box.lastElementChild.remove();
+  if (focused && focused !== document.activeElement && box.contains(focused)) focused.focus();
+  $('side-badge').hidden = elsewhere === 0;          // 다른 세션에 「내가 정할 것」이 있다
+}
+function updateBar() {
+  const role = current(); if (!role) return;
+  const status = statusOf(role, pendingNames()), line = rowLine(role, status);
+  $('chat-title').textContent = role.name; $('chat-sub').textContent = statusWords[status] + (line ? ' · ' + line : '');
+  $('chat-sub').title = $('chat-sub').textContent; $('session-more').setAttribute('aria-label', role.name + ' 메뉴');
+}
+function elapsedSeconds() { return Math.max(0, ((clockPausedAt === null ? performance.now() : clockPausedAt) - jobsAt) / 1000); }
+function sinceSeconds(since) {
+  const seconds = (Date.parse(state.observed_at) - Date.parse(since)) / 1000;
+  return Number.isFinite(seconds) ? Math.max(0, seconds + elapsedSeconds()) : 0;
+}
+function minuteAge(seconds) { const minutes = Math.floor(seconds / 60); return minutes ? minutes + '분째' : ''; }
+function liveText(role) {
+  if (connectionLost) return '연결 끊김';
+  if (role.turn_seconds == null) return role.reason || '기다림';
+  const elapsed = elapsedSeconds(), idle = Math.floor((role.idle_seconds || 0) + elapsed), total = Math.floor(role.turn_seconds + elapsed);
+  // 1분이 넘으면 「3분 10초」 꼴로 — 「190초」보다 한눈에 읽힌다
+  return (total < 60 ? total + '초' : Math.floor(total / 60) + '분 ' + total % 60 + '초') + ' · ' + (role.phase_text || '생각 중') + (idle >= 120 ? ' · ' + minuteAge(idle) + ' 새 움직임 없음' : '');
+}
+function updateLive() {
+  const role = current(), on = !!role && (role.turn_seconds != null || role.status === 'working' || role.status === 'waiting');
+  $('live').hidden = !on;
+  $('live').classList.toggle('paused', connectionLost || document.hidden || !on || role.turn_seconds == null);
+  if (on) { const text = liveText(role); if ($('live-text').textContent !== text) $('live-text').textContent = text; }
+  updateToolNow(connectionLost ? null : role);
+}
+function updateAges() {
+  if (!state) return;
+  const put = (view, seconds) => { if (view && view.age) { const text = minuteAge(seconds); if (view.age.textContent !== text) view.age.textContent = text; } };
+  const pending = pendingNames();
+  for (const role of state.roles) {
+    const status = statusOf(role, pending), decision = state.decisions.find(d => d.from === role.name);
+    const seconds = status === 'need' ? sinceSeconds(decision.since) : status === 'working' && role.turn_seconds != null ? role.turn_seconds + elapsedSeconds() : status === 'waiting' || status === 'working' ? sinceSeconds(role.status_since) : 0;
+    put(roleNodes.get(role.name), seconds);
+  }
+  for (const decision of state.decisions) put(decisionNodes.get(decision.id), sinceSeconds(decision.since));
+}
+function setConnectionLost(lost) {
+  connectionLost = lost;
+  if (lost && clockPausedAt === null) clockPausedAt = performance.now();
+  updateLive(); updateClock();
+}
+function updateClock() {
+  if (jobTimer !== null) clearTimeout(jobTimer); jobTimer = null;
+  if (!state || programStopped || document.hidden || connectionLost || clockPausedAt !== null) return;
+  const role = current(), chat = !phone.matches || app.dataset.view === 'chat';
+  const list = phone.matches ? app.dataset.view === 'list' : app.dataset.side !== 'off';
+  const jobs = panelVisible() && !$('pane-tasks').hidden && (state.jobs || []).some(job => job.role === selected && job.status === 'running');
+  const ages = list && (state.decisions.length || state.roles.some(r => r.status === 'working' || r.status === 'waiting')) || chat && state.decisions.some(d => d.from === selected);
+  if (!(chat && role && role.turn_seconds != null) && !jobs && !ages) return;
+  jobTimer = setTimeout(() => {
+    jobTimer = null; updateLive(); updateAges();
+    if (jobs) for (const job of state.jobs) { const view = jobNodes.get(job.id); if (view) view.status.textContent = jobStatus(job); }
+    updateClock();
+  }, 1000);
+}
+function updateLimits() {
+  const windows = {seven_day:'주간',five_hour:'5시간'}, parts = []; let tight = false;
+  for (const [engine, limit] of Object.entries(state.limits || {})) {
+    if (limit.pct == null) continue;
+    parts.push(engine + ' ' + (windows[limit.window] || limit.window) + ' ' + Math.round(limit.pct) + '%');
+    if (limit.status === 'hold' || limit.status === 'stop') tight = true;
+  }
+  $('limits').textContent = parts.join(' · '); $('limits').title = parts.join(' · '); $('limits').classList.toggle('warn', tight);
+}
+function updateComposer() {
+  micUpdate();
+  const role = current(), lead = !!role && role.lead, off = !role || role.off;
+  $('text-label').textContent = role ? role.name + '에게' : '';
+  $('text').placeholder = !role ? '' : off ? '꺼 둔 역할이다 — 켜면 글을 보낼 수 있다' : lead ? role.name + '에게 맡길 일이나 보탤 말을 적는다' : role.name + '에게 보낼 글을 적는다';
+  $('text').readOnly = sending; $('text').disabled = off; $('send').disabled = sending || off;
+  $('image-add').hidden = !lead; $('image-add').disabled = sending; $('image-files').disabled = sending || !lead; $('attachments').hidden = !lead;
+  $('attachments').querySelectorAll('button').forEach(b => { b.disabled = sending; });
+  $('model').textContent = role ? [role.engine, role.model].filter(Boolean).join(' · ') : '';
+  $('stop').hidden = !(role && (role.status === 'working' || role.status === 'waiting' || role.queue > 0)); $('stop').disabled = sending;
+}
+// ── 내가 정할 것(그 세션의 대화 아래 · 입력칸 위) ─────────────────────────────
+function decisionCard(decision) {
+  if (decision.action) return actionCard(decision);
+  const card = node('div', null, 'decision-card'), fields = [];
+  card.append(node('small', '내가 정할 것 · ' + decision.from));
+  decision.questions.forEach((question, index) => {
+    const field = node('div', null, 'question'), chosen = new Set();
+    field.append(node('p', question.question));
+    const options = node('div', null, 'options'), buttons = [];
+    (question.options || []).forEach(option => {
+      const choice = button('', () => {
+        const was = chosen.has(option.label);
+        if (!question.multiSelect) chosen.clear();
+        if (was) chosen.delete(option.label); else chosen.add(option.label);
+        buttons.forEach(item => item.button.setAttribute('aria-pressed', String(chosen.has(item.label))));
+      }, 'option');
+      choice.setAttribute('aria-pressed','false'); choice.append(node('span', option.label));
+      if (option.description) choice.append(node('small', option.description));
+      buttons.push({button:choice, label:option.label}); options.append(choice);
+    });
+    if (buttons.length) field.append(options);
+    const input = node('input'); input.type = 'text'; input.id = 'answer-' + decision.id + '-' + index;
+    const label = node('label', '직접 쓰기'); label.htmlFor = input.id;
+    field.append(label, input); card.append(field); fields.push({question, chosen, input});
+  });
+  const errorLine = node('p', '', 'message'); errorLine.setAttribute('role','status');
+  const answer = button('답하기', async () => {
+    const answers = {};
+    for (const field of fields) {
+      const value = field.input.value.trim() || Array.from(field.chosen).join(', ');
+      if (!value) { errorLine.textContent = '질문마다 답을 고르거나 적는다'; return; }
+      answers[field.question.question] = value;
+    }
+    answer.disabled = true;
+    try { await api('/api/decide', {id:decision.id, answers}); errorLine.textContent = ''; scheduleState(); }
+    catch (error) { errorLine.textContent = error.message; }
+    finally { answer.disabled = false; }
+  }, 'primary');
+  card.append(answer, errorLine); return card;
+}
+function actionCard(decision) {
+  const action = decision.action, commit = action.kind === 'commit', card = node('div', null, 'decision-card action-card');
+  const check = action.kind === 'check_add' || action.kind === 'check_remove';
+  card.append(node('strong', (action.kind === 'custom' ? 'Custom 청 · ' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청 · ' : commit ? '커밋 청 · ' : '푸시 청 · ') + decision.from));
+  const list = node('div', null, 'action-list');
+  if (action.kind === 'custom') {
+    const text = action.text || '', preview = text.split('\n').slice(0, 8).join('\n').slice(0, 1200);
+    card.append(node('p', ({all:'전체 프로젝트',project:'이 프로젝트',role:'이 역할'}[action.scope] || action.scope) + (action.role ? ' · ' + action.role : '')),
+      node('p', '왜: ' + action.why), node('pre', preview || '없음 — 파일을 지운다'));
+    if (preview.length < text.length) { const more = node('details'); more.append(node('summary', '새 글 전체 보기'), node('pre', text)); card.append(more); }
+  } else if (check) {
+    card.append(node('p', action.check.name), node('pre', action.check.command),
+      node('p', 'when: ' + (action.check.when.join(', ') || '(어떤 파일이든)')),
+      node('p', '셸: ' + (action.check.shell || '기본') + ' · 시간 한도: ' + action.check.timeout_min + '분'), node('p', '왜: ' + action.why));
+  } else if (commit) {
+    const counts = action.counts, words = {new:'새', modified:'고침', deleted:'지움'};
+    const total = counts.new + counts.modified + counts.deleted;
+    card.append(node('p', '파일 ' + total + '개(새 ' + counts.new + ' · 고침 ' + counts.modified + ' · 지움 ' + counts.deleted + ')'));
+    for (const file of action.files) list.append(node('p', (words[file.kind] || file.kind) + ' · ' + file.path));
+    if (total > action.files.length) list.append(node('small', '파일 ' + (total - action.files.length) + '개 더 있다'));
+    card.append(list, node('pre', action.message));
+  } else {
+    card.append(node('p', action.branch + ' → ' + action.upstream + ' · 커밋 ' + action.count + '개'));
+    if (action.url) card.append(node('p', action.url, 'action-url'));
+    for (const item of action.commits) list.append(node('p', item.hash.slice(0, 12) + ' · ' + item.subject));
+    card.append(list);
+  }
+  const reason = node('input'); reason.type = 'text'; reason.id = 'reject-' + decision.id;
+  const label = node('label', '거절 까닭(선택)'); label.htmlFor = reason.id;
+  const errorLine = node('p', '', 'message'); errorLine.setAttribute('role', 'status');
+  const send = async value => {
+    approve.disabled = reject.disabled = true; reason.disabled = true;
+    try { await api('/api/decide', {id:decision.id, answers:{[decision.questions[0].question]:value}}); scheduleState(); }
+    catch (error) { errorLine.textContent = error.message; approve.disabled = reject.disabled = reason.disabled = false; }
+  };
+  const approve = button('승인', () => send('승인'), 'primary');
+  const reject = button('거절', () => send(reason.value.trim() ? '거절: ' + reason.value.trim() : '거절'));
+  const actions = node('div', null, 'actions'); actions.append(approve, reject);
+  card.append(label, reason, actions, errorLine); return card;
+}
+function updateDecisions() {
+  const ids = new Set(state.decisions.map(d => d.id)); let shown = 0;
+  for (const [id, view] of decisionNodes) if (!ids.has(id)) { view.card.remove(); decisionNodes.delete(id); }
+  for (const decision of state.decisions) {
+    const signature = JSON.stringify(decision.action ? [decision.questions, decision.action] : decision.questions); let view = decisionNodes.get(decision.id);
+    if (!view || view.signature !== signature) {
+      const card = decisionCard(decision);
+      if (view) view.card.replaceWith(card); else $('decision-list').append(card);
+      const age = node('small', '', 'age'); card.append(age);
+      view = {card, signature, age}; decisionNodes.set(decision.id, view);
+    }
+    view.card.hidden = decision.from !== selected;          // 다른 세션의 것은 그 세션을 고르면 보인다(적던 답은 남는다)
+    if (!view.card.hidden) shown++;
+  }
+  $('decisions').hidden = shown === 0;
+}
+function updateNotices() {
+  const signature = JSON.stringify(state.notices);
+  if (signature === noticeSignature) return;
+  noticeSignature = signature; $('notices').replaceChildren();
+  for (const notice of state.notices) {
+    const row = node('p', notice.text, 'notice');
+    if (notice.hold) row.append(node('small', ' — ' + notice.hold, 'muted'));
+    $('notices').append(row);
+  }
+  if (state.notices.some(notice => !notice.hold)) $('notices').append(button('알림 지우기', () => act('/api/notices', {clear:true})));
+}
+// ── 설정 · 프로젝트 ──────────────────────────────────────────────────────────
+async function shutdownProgram() {
+  if (programStopped || !state || (state.remote || {}).via === 'remote') return;
+  const stop = $('program-shutdown');
+  if (!programArmed) { programArmed = true; stop.textContent = '한 번 더 누르면 꺼진다 — 일하던 세션이 멈춘다'; return; }
+  if (stop.disabled) return;
+  stop.disabled = true;
+  try {
+    await api('/api/shutdown', {});
+    programStopped = true; visibilityVersion++;
+    if (source) source.close(); source = null;
+    if (stateTimer !== null) clearTimeout(stateTimer); stateTimer = null;
+    if (jobTimer !== null) clearTimeout(jobTimer); jobTimer = null;
+    $('settings').close(); app.hidden = true;
+    // 앱 바깥에도 보인다. 늦게 온 요청의 글로 끝 안내가 덮이지 않게 message에서도 지킨다.
+    $('no-key').hidden = false;
+    $('no-key').textContent = '꺼졌다. 다시 켜려면 바탕화면 아이콘을 더블클릭한다.';
+    message('꺼졌다. 다시 켜려면 바탕화면 아이콘을 더블클릭한다.');
+  } catch (error) {
+    programArmed = false; stop.disabled = false; stop.textContent = '프로그램 끄기';
+    $('settings-error').textContent = error.message;
+  }
+}
+function settingsRow(title, detail) { const row = node('div', null, 'settings-row'), text = node('div'); text.append(node('p', title), node('small', detail)); row.append(text); return row; }
+function showApp() {
+  const section = $('settings-app'), install = $('app-install'), status = $('app-status');
+  section.hidden = state?.remote?.via !== 'remote';
+  if (section.hidden) return;
+  install.hidden = true;
+  if (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true) {
+    status.textContent = '앱으로 열려 있다.';
+  } else if (appInstalled) {
+    status.textContent = '설치했다 — 홈 화면의 아이콘으로 연다.';
+  } else if (appPrompt) {
+    status.textContent = '홈 화면에 두면 주소창 없이 앱처럼 열린다.';
+    install.hidden = false;
+  } else if (window.isSecureContext) {
+    status.textContent = '브라우저 메뉴의 「홈 화면에 추가」를 누르면 앱처럼 열린다(아이폰은 공유 → 홈 화면에 추가).';
+  } else {
+    status.textContent = '지금은 http 로 열려 있다 — 브라우저는 https 로 열린 화면만 앱으로 설치한다.';
+  }
+}
+async function installApp() {
+  if (state?.remote?.via !== 'remote' || !appPrompt) return;
+  const event = appPrompt; appPrompt = null;
+  showApp();
+  try {
+    await event.prompt();
+    if ((await event.userChoice).outcome === 'accepted') { appInstalled = true; appPrompt = null; }
+  } catch (_) {}                         // 닫거나 실패한 설치 창도 한 번만 쓴다.
+  if ($('settings').open) showApp();
+}
+function updateSettings() {
+  if (!$('settings').open) return;
+  const signature = JSON.stringify([state.roles.map(r => [r.name, r.engine, r.model, r.effort, r.write, r.off, r.switched]), state.tools, state.limits, state.accounts, state.remote]);
+  if (settingsSignature === signature) return;
+  settingsSignature = signature;
+  const activeName = document.activeElement.dataset.role;
+  const names = {claude:'Claude',codex:'GPT'};
+  $('settings-roles').replaceChildren();
+  for (const role of state.roles) {
+    const row = settingsRow(role.name, (names[role.engine] || role.engine) + ' · ' + (role.model || '모델 기본값') + ' · ' + (role.effort || '세기 기본값'));
+    if (role.switched) row.append(node('small', switchedText(role), 'muted'));
+    if (!role.lead) {
+      const toggle = button(role.off ? '켜기' : '끄기', async () => {
+        toggle.disabled = true; await act('/api/role', {action:role.off ? 'on' : 'off', name:role.name}, 'settings-error'); toggle.disabled = false;
+      });
+      toggle.dataset.role = role.name; row.append(toggle); if (activeName === role.name) requestAnimationFrame(() => toggle.focus());
+    }
+    const scope = node('details'); scope.append(node('summary', '쓰기 범위'), node('p', (role.write || []).join(', ') || '없음'));
+    row.append(scope); $('settings-roles').append(row);
+  }
+  $('settings-tools').replaceChildren();
+  for (const tool of state.tools || []) $('settings-tools').append(settingsRow(tool.name + ' · ' + (tool.makes || ''), tool.on ? '켬' : '끔'));
+  $('settings-tools-section').hidden = !(state.tools || []).length;
+  $('settings-limits').replaceChildren();
+  const words = {ok:'여유 있음',hold:'새 일 보류',stop:'멈춤',unknown:'모름'}, windows = {seven_day:'주간',five_hour:'5시간'};
+  for (const [engine, limit] of Object.entries(state.limits || {})) {
+    const account = state.accounts?.[engine], plan = account?.kind === 'api' ? 'API 키' : account?.kind === 'subscription' && account.plan ? '구독 ' + account.plan : '';
+    const detail = engine === 'codex' && limit.pct == null ? '아직 못 읽음 — GPT 역할이 일하거나 지휘자를 켤 때 읽는다' : (limit.pct == null ? '?' : limit.pct) + '% · ' + (words[limit.status] || limit.status);
+    $('settings-limits').append(settingsRow((names[engine] || engine) + ' · ' + (windows[limit.window] || limit.window),
+      detail + (plan ? ' · ' + plan : '')));
+  }
+  showRemote();
+}
+async function showRemote() {
+  if (!$('settings').open) return;
+  const box = $('settings-remote'), version = ++remoteVersion;
+  const current = () => version === remoteVersion && $('settings').open;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let listed = null, failure = '', data = null, qrError = '', qrAddress;
+    if (state.remote?.via !== 'remote' && state.remote?.enabled) {
+      try { listed = await api('/api/devices'); } catch (error) { failure = error.message; }
+      if (!current()) return;
+    }
+    if (state.remote?.via !== 'remote' && state.remote?.enabled && state.remote?.public && state.remote?.listening) {
+      qrAddress = state.remote.address;
+      try { data = await api('/api/remote/qr'); } catch (error) { qrError = error.message; }
+      if (!current()) return;
+    }
+    // 기다린 뒤의 값을 복사한다. 그리는 동안 바뀌어도 비교할 값은 남긴다.
+    const remote = {...state.remote}, signature = JSON.stringify(remote), rows = [];
+    $('settings-program').hidden = remote.via === 'remote'; showApp();
+    if (remote.via === 'remote') rows.push(node('p', '이 기기는 원격으로 붙어 있다 — 기기 등록과 끊기는 PC 화면에서 한다', 'muted'));
+    else if (!remote.enabled) rows.push(node('p', '폰 · 다른 컴퓨터에서 쓰려면 켠다. 이 PC 의 Tailscale 이 인터넷 주소 하나를 열고, 등록한 기기만 들어온다.', 'muted'), publicSwitch('on'));
+    else {
+      const code = node('p', '', 'message'); code.setAttribute('role','status');
+      rows.push(button('기기 등록', async () => {
+        try { const started = await api('/api/pair/start', {}); code.textContent = '등록 코드: ' + started.code + ' — ' + Math.floor(started.seconds / 60) + '분 안에 폰 화면에 넣는다'; }
+        catch (error) { code.textContent = error.message; }
+      }), code);
+      if (remote.public) rows.push(publicSwitch('off'));
+      if (remote.public && !remote.listening) rows.unshift(node('p', '공개 문이 닫혀 있다 — 이 PC의 포트를 열지 못했다', 'message'));
+      if (remote.public && remote.listening) {
+        const address = node('p', remote.address, 'message'), qr = node('div');
+        rows.unshift(node('p', '공개 길 — 인터넷에서 열린다'), address, qr);
+        if (data && qrAddress === remote.address) {
+          const canvas = node('canvas'), scale = Math.max(1, Math.floor(200 / (data.size + 8)));
+          canvas.width = canvas.height = (data.size + 8) * scale;
+          canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', '폰으로 열 주소의 QR 코드');
+          const context = canvas.getContext('2d');
+          context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = '#000';
+          data.rows.forEach((row, y) => { Array.from(row).forEach((cell, x) => { if (cell === '1') context.fillRect((x + 4) * scale, (y + 4) * scale, scale, scale); }); });
+          qr.append(canvas);
+        } else if (qrError) qr.append(node('p', qrError, 'message'));
+      }
+      for (const device of listed?.devices || []) {
+        const row = settingsRow(device.name, [device.user, '등록 ' + device.created_at.slice(0, 10), '마지막 접속 ' + device.seen_at.slice(0, 10)].filter(Boolean).join(' · '));
+        row.append(button('끊기', async () => { if (await act('/api/devices', {forget:device.id}, 'settings-error')) showRemote(); })); rows.push(row);
+      }
+      if (failure) rows.push(node('p', failure, 'message'));
+      else if (!listed?.devices.length) rows.push(node('p', '등록한 기기가 없다', 'muted'));
+    }
+    if (!current()) return;
+    box.replaceChildren(...rows);
+    if (signature === JSON.stringify(state.remote || {}) && !(remote.via !== 'remote' && remote.enabled && remote.public && remote.listening && qrAddress !== remote.address)) return;
+  }
+}
+function publicSwitch(action) {
+  if (publicSwitch.action === action && publicSwitch.box) { publicSwitch.box.refresh(); return publicSwitch.box; }
+  const box = node('div'), messages = node('div'); messages.setAttribute('role', 'status'); messages.style.userSelect = 'text';
+  messages.append(...remoteResultNodes());
+  let armed = false, busy = false;
+  const label = action === 'on' ? '폰 · 웹에서 쓰기 켜기' : '끄기';
+  const toggle = button(label, async () => {
+    if (busy) return;
+    if (!armed) {
+      showRemote.result = null; messages.replaceChildren();
+      armed = true; toggle.textContent = action === 'on' ? '한 번 더 누르면 켠다' : '한 번 더 누르면 꺼진다';
+      if (action === 'on') messages.replaceChildren(...[
+        '① 그 주소는 인터넷 어디서나 열린다 — 들어오는 것은 등록한 기기뿐이다',
+        '② 이 PC 의 Tailscale 기기 이름이 공개 기록에 남고 지울 수 없다',
+        '③ Tailscale 무료 요금제는 비상업용이다'
+      ].map(text => node('p', text, 'message')));
+      return;
+    }
+    busy = true; toggle.disabled = true;
+    const closed = showRemote.closed;
+    try {
+      const result = await api('/api/remote', {action});
+      if (!result.ok) { const error = new Error('요청을 마치지 못했다'); error.lines = result.lines; throw error; }
+      if (closed === showRemote.closed) showRemote.result = result;
+    } catch (error) {
+      if (closed === showRemote.closed) showRemote.result = {lines:error.lines || [error.message]};
+    } finally { armed = false; busy = false; toggle.disabled = false; toggle.textContent = label; }
+    messages.replaceChildren(...remoteResultNodes());
+    try { await receiveState(); await showRemote(); } catch (_) {}
+  });
+  box.refresh = () => { if (!armed && !busy) messages.replaceChildren(...remoteResultNodes()); };
+  box.append(messages, toggle); publicSwitch.action = action; publicSwitch.box = box; return box;
+}
+function remoteResultNodes() {
+  const result = showRemote.result || {}, warn = result.warn || '';
+  const rows = (result.lines || []).filter(text => !warn.includes(text)).map(text => node('p', text, 'message'));
+  if (warn) { const line = node('p', '경고: ' + warn, 'message'); line.setAttribute('role', 'alert'); rows.push(line); }
+  return rows;
+}
+const projectWords = {missing:'폴더 없음',off:'꺼짐',needs_input:'내 확인 필요',blocked:'막힘',working:'일하는 중',idle:'쉼'};
+async function showProjects() {
+  const box = $('project-list'), version = ++projectsVersion; box.replaceChildren(); $('projects-error').textContent = '';
+  try {
+    const listed = await api('/api/projects');
+    if (version !== projectsVersion) return;
+    for (const project of listed.projects) {
+      const row = settingsRow(project.name, (projectWords[project.status] || project.status) + (project.decisions ? ' · 정할 것 ' + project.decisions : '') + (project.working ? ' · 일하는 역할 ' + project.working : ''));
+      // 떠 있는 다른 프로젝트: PC에서는 서버가 준 주소로, 원격에서는 지금 주소의 이름에 그 프로젝트의 원격 포트를 붙여 간다.
+      const address = project.url || (project.serve && project.running ? (project.https ? 'https:' : 'http:') + '//' + location.hostname + ':' + project.serve + '/' : '');
+      if (project.current) row.append(node('small', '지금 여기'));
+      else if (address) { const link = node('a', '열기'); link.href = address; row.append(link); }
+      else if (listed.can_open && project.status === 'off') {
+        const start = button('켜기', async () => {
+          start.disabled = true; $('projects-error').textContent = '';
+          try { location.href = (await api('/api/projects', {open:project.root})).url; }
+          catch (error) { $('projects-error').textContent = error.message; start.disabled = false; }
+        });
+        row.append(start);
+      }
+      box.append(row);
+    }
+  } catch (error) { $('projects-error').textContent = error.message; }
+}
+$('projects-open').addEventListener('click', () => { $('projects').showModal(); showProjects(); });
+// 설정을 열 때 상태를 한 번 다시 받는다 — 원격 접속은 터미널(`gaf remote on`)에서 켜고 끄므로 이벤트가 오지 않는다.
+$('settings-open').addEventListener('click', async () => {
+  resetSettings(); $('settings').showModal(); settingsSignature = ''; if (state) updateSettings();
+  // 연 때의 값을 새로 받아 한 번 더 그린다 — 밖(명령줄 · 다른 화면)에서 바꾼 원격 설정
+  try { await receiveState(); } catch (error) { $('settings-error').textContent = error.message; }
+  settingsSignature = ''; if (state && $('settings').open) updateSettings();
+});
+$('program-shutdown').addEventListener('click', shutdownProgram);
+$('app-install').addEventListener('click', installApp);
+// 열 때와 닫을 때 원격 칸 · 「프로그램 끄기」의 상태를 비운다. close 이벤트는 늦게 올 수 있다(Chrome 은 다음 그리기 때 보낸다 — 앞으로 막 온 탭에서
+// 닫고 바로 다시 열면 다시 연 뒤에 온다) — 그때 비우면 다시 연 창이 막 그리던 원격 칸을 버린다(11-17 화면 탐침 「닫힌 공개 문」 칸).
+function resetSettings() { showRemote.result = null; publicSwitch.box = null; showRemote.closed = (showRemote.closed || 0) + 1; remoteVersion++; if (!programStopped) { programArmed = false; $('program-shutdown').textContent = '프로그램 끄기'; } }
+$('settings').addEventListener('close', () => { if (!$('settings').open) resetSettings(); });
+// ── 새 역할 ──────────────────────────────────────────────────────────────────
+let roleTemplates = [], roleTemplateVersion = 0;
+function roleEfforts() {
+  const select = $('role-new-effort'), chosen = select.value, engine = $('role-new-engine').value || state?.defaults?.engine;
+  const efforts = state?.engines?.[engine]?.efforts || [];
+  select.replaceChildren(new Option('기본값', ''), ...efforts.map(effort => new Option(effort, effort)));
+  select.value = efforts.includes(chosen) ? chosen : '';
+}
+$('role-new-engine').addEventListener('change', roleEfforts);
+async function loadRoleTemplates() {
+  const version = ++roleTemplateVersion, select = $('role-new-template');
+  roleTemplates = []; select.value = ''; select.replaceChildren(new Option('직접 쓰기', ''));
+  select.hidden = true; $('role-new-template-label').hidden = true; $('role-new-write').placeholder = '';
+  try {
+    const result = await api('/api/library?kind=roles');
+    if (version !== roleTemplateVersion) return;
+    if (!Array.isArray(result.items)) throw new Error('서랍 목록이 없다');
+    roleTemplates = result.items;
+    const groups = new Map();
+    for (const item of roleTemplates) {
+      const name = item.group || '기타';
+      if (!groups.has(name)) { const group = node('optgroup'); group.label = name; groups.set(name, group); select.append(group); }
+      groups.get(name).append(new Option(item.title, item.id));
+    }
+    select.hidden = false; $('role-new-template-label').hidden = false;
+  } catch (_) {
+    if (version !== roleTemplateVersion) return;
+    roleTemplates = []; select.value = ''; select.hidden = true; $('role-new-template-label').hidden = true;
+  }
+}
+$('role-new-template').addEventListener('change', () => {
+  const item = roleTemplates.find(row => row.id === $('role-new-template').value);
+  if (item && !$('role-new-duty').value.trim()) $('role-new-duty').value = item.summary;
+  $('role-new-write').placeholder = item ? item.scope : '';
+});
+$('role-new-open').addEventListener('click', async () => {
+  const engines = Object.keys(state?.engines || {});
+  $('role-new-engine').replaceChildren(new Option('기본값', ''), ...engines.map(engine => new Option(engine, engine)));
+  roleEfforts();
+  $('role-new-error').textContent = ''; $('role-new').showModal(); $('role-new-name').focus();
+  await loadRoleTemplates();
+});
+$('role-new-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const name = $('role-new-name').value.trim(), duty = $('role-new-duty').value.trim(), data = {action:'new', name, duty};
+  const template = $('role-new-template').value;
+  if (template) data.template = template;
+  if (!name || (!duty && !template)) { $('role-new-error').textContent = '이름과 하는 일을 적는다'; return; }
+  if ($('role-new-engine').value) data.engine = $('role-new-engine').value;
+  if ($('role-new-model').value.trim()) data.model = $('role-new-model').value.trim();
+  if ($('role-new-effort').value) data.effort = $('role-new-effort').value;
+  const write = $('role-new-write').value.split('\n').map(line => line.trim()).filter(Boolean); if (write.length) data.write = write;
+  try { await api('/api/role', data); } catch (error) { $('role-new-error').textContent = error.message; return; }
+  $('role-new').close(); $('role-new-form').reset();
+  try { await receiveState(); select(name); } catch (error) { message(error.message); }
+});
+// ── 오른쪽 패널(일 · 결과물 · 인계 · 역할 글) ─────────────────────────────────
+function panelVisible() { return phone.matches ? app.dataset.view === 'panel' : app.dataset.panel !== 'off'; }
+function showTab(name, focus) {
+  for (const tab of tabs) { const on = tab === name, b = $('tab-' + tab); b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; $('pane-' + tab).hidden = !on; if (on && focus) b.focus(); }
+  app.dataset.tab = name; refreshChanges(); updateJobs();          // 「바뀐 코드」를 볼 때는 PC의 패널이 넓어진다
+}
+tabs.forEach((tab, index) => {
+  $('tab-' + tab).addEventListener('click', () => showTab(tab));
+  $('tab-' + tab).addEventListener('keydown', event => {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (step) { event.preventDefault(); showTab(tabs[(index + step + tabs.length) % tabs.length], true); }
+  });
+});
+function resetDetail() {
+  detailSandbox = [];
+  detailVersion++; detailSignature = ''; taskNodes.clear(); $('task-list').replaceChildren(); $('artifacts').replaceChildren(); delete $('artifacts').dataset.signature;
+  delete $('now').dataset.signature; $('now').replaceChildren(); $('handoff').textContent = ''; $('role-text').textContent = ''; $('panel-error').textContent = '';
+}
+function updateNow() {           // 「일」 맨 위의 지금 모습 — 받아 둔 상태만으로 그린다
+  const role = current(), box = $('now'); if (!role) return;
+  const status = statusOf(role, pendingNames()), rows = [['세션', role.name], ['상태', statusWords[status] + (role.task && role.task.title ? ' · ' + role.task.title : '')]];
+  if (role.status === 'working' && role.now) rows.push(['지금', role.now]);
+  if (role.reason) rows.push(['까닭', role.reason]);
+  rows.push(['엔진', [role.engine, role.model].filter(Boolean).join(' · '), role.switched ? switchedText(role) : '']);
+  if (role.context_pct != null) rows.push(['문맥', role.context_pct + '%']);
+  if (role.queue) rows.push(['줄', role.queue + '개']);
+  rows.push(['쓰기', (role.write || []).join(', ') || '없음']);
+  if (detailSandbox.length) rows.push(['샌드박스', detailSandbox.join(', ')]);
+  const signature = JSON.stringify(rows); if (box.dataset.signature === signature) return;
+  box.dataset.signature = signature; box.replaceChildren();
+  for (const [name, value, switched] of rows) {
+    const detail = node('dd', value); if (switched) detail.append(node('small', ' · ' + switched, 'muted'));
+    box.append(node('dt', name), detail);
+  }
+}
+function detailKey() { const r = current(); return r ? JSON.stringify([r.name, r.status, r.task, r.last, r.queue, r.handoff_at, r.off, r.session, state.artifacts]) : ''; }
+function taskStateText(task, now = '') {
+  const status = taskWords[task.status] || task.status, over = !['queued', 'running'].includes(task.status);
+  if (over && task.expect_ok === false) return status + ' · 결과물 확인 실패';
+  if (task.review_ok === true) return status + ' · 검토 r' + task.review_best + ' 채택(' + task.reviews + '번 후보)';
+  if (task.review_ok === false) return status + ' · 채택 없음(' + task.reviews + '번 후보)';
+  if (task.status === 'running' && task.review_ok === null) return status + ' · 검토 ' + (task.reviews + 1) + '번째 후보';
+  if (task.check_ok === true) return status + ' · 검사 통과(' + task.checks + '번째)';
+  if (task.check_ok === false) return status + ' · 검사 실패(' + task.checks + '번)';
+  if (task.status === 'running' && task.check_ok === null && now.startsWith('검사 ')) return '일하는 중 · ' + now;
+  if (!over) return status;
+  // 검사 · 검토 줄이 없는 끝난 일: 확인 상태를 보인다(못 봄은 통과가 아니다).
+  if (task.verify === 'passed') return status + ' · 확인 통과';
+  if (task.verify === 'failed') return status + ' · 확인 실패';
+  if (task.verify === 'not_run' || task.verify === 'could_not_run') return status + ' · 확인 못 봄';
+  return status;
+}
+function updateTaskStates() {
+  for (const view of taskNodes.values()) view.status.textContent = taskStateText(view.task, (current() || {}).now || '');
+}
+function renderRoleText(detail) {
+  const layers = [{label:'공통 규칙(기본)',text:detail.common_text},{label:'역할 글(기본)',text:detail.role_text},
+    ...(detail.custom || []).map(layer => ({...layer,label:'Custom · ' + layer.label}))];
+  $('role-text').replaceChildren();
+  for (const layer of layers) {
+    const box = node('section', null, 'role-layer'), head = node('div', null, 'actions'); head.append(node('strong', layer.label));
+    if (layer.scope) head.append(button('고치기', () => openCustom(layer, detail.name)));
+    box.append(head, node('pre', (layer.text || '').trim() ? layer.text : '없음')); $('role-text').append(box);
+  }
+}
+function openCustom(layer, role) {
+  if (customSaving) return;
+  customEdit = {scope:layer.scope,role:layer.scope === 'role' ? role : ''};
+  $('custom-title').textContent = layer.label; $('custom-path').textContent = layer.path;
+  $('custom-text').value = layer.text || ''; $('custom-error').textContent = ''; $('custom-edit').showModal(); $('custom-text').focus();
+}
+async function saveCustom() {
+  if (customSaving || !customEdit) return;
+  customSaving = true; $('custom-error').textContent = '';
+  $('custom-save').disabled = $('custom-close').disabled = $('custom-text').disabled = true;
+  try {
+    await api('/api/custom', {...customEdit,text:$('custom-text').value});
+    $('custom-edit').close(); detailSignature = ''; await refreshDetail();
+  } catch (error) { $('custom-error').textContent = error.message; }
+  finally { customSaving = false; $('custom-save').disabled = $('custom-close').disabled = $('custom-text').disabled = false; }
+}
+async function refreshDetail() {
+  if (!selected || !state || !panelVisible()) return;
+  if (detailBusy) { detailDirty = true; return; }
+  detailBusy = true; detailDirty = false;
+  const name = selected, version = ++detailVersion, lead = !!current() && current().lead; detailSignature = detailKey();
+  try {
+    const detail = await api('/api/role?name=' + encodeURIComponent(name));
+    if (name !== selected || version !== detailVersion) return;
+    detailSandbox = detail.sandbox || []; updateNow();
+    $('panel-error').textContent = ''; renderRoleText(detail); $('handoff').textContent = detail.handoff || '(비어 있다)';
+    const ids = new Set(detail.tasks.map(t => t.id));
+    for (const [id, view] of taskNodes) if (!ids.has(id)) { view.box.remove(); taskNodes.delete(id); }
+    if (!detail.tasks.length && !$('task-list').children.length) $('task-list').append(node('p', '맡은 일이 아직 없다', 'muted'));
+    for (const task of detail.tasks) {
+      let view = taskNodes.get(task.id);
+      if (!view) {
+        if (!taskNodes.size) $('task-list').replaceChildren();
+        const box = node('div', null, 'task'), title = node('span'), status = node('span', '', 'muted'), toggle = button('', async () => {
+          view.full.hidden = !view.full.hidden; toggle.setAttribute('aria-expanded', String(!view.full.hidden));
+          if (!view.full.hidden) await loadTask(task.id, view);
+        });
+        toggle.append(title, status); toggle.setAttribute('aria-expanded','false'); const full = node('pre'); full.hidden = true; box.append(toggle, full);
+        view = {box, title, status, full, signature:''}; taskNodes.set(task.id, view); $('task-list').append(box);
+      }
+      view.task = task; view.title.textContent = task.title; view.status.textContent = taskStateText(task, (current() || {}).now || '');
+      const signature = JSON.stringify(task);
+      if (view.signature !== signature && !view.full.hidden) await loadTask(task.id, view);
+      view.signature = signature;
+    }
+    if (name !== selected || version !== detailVersion) return;
+    const made = state.artifacts.filter(a => lead || a.role === name), signature = JSON.stringify(made);      // 총괄을 고르면 모든 역할의 결과물
+    if ($('artifacts').dataset.signature !== signature) {
+      $('artifacts').dataset.signature = signature; $('artifacts').replaceChildren();
+      for (const artifact of made) {
+        if (artifact.kind === 'image') { const view = picture(artifact.path); view.title = artifact.path + ' · ' + artifact.role; $('artifacts').append(view); }
+        else if (artifact.kind === 'video' || artifact.kind === 'audio') {
+          const view = node('div', null, 'media'); view.append(player(artifact.kind, artifact.path), node('small', artifact.path.split('/').pop() + (lead ? ' · ' + artifact.role : ''))); $('artifacts').append(view);
+        }
+        else { const a = node('a', artifact.path.split('/').pop() + (lead ? ' · ' + artifact.role : '')); a.href = fileURL(artifact.path); a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = artifact.path; $('artifacts').append(a); }
+      }
+      if (!made.length) $('artifacts').append(node('p', '결과물이 아직 없다', 'muted'));
+    }
+  } catch (error) { if (name === selected && version === detailVersion) $('panel-error').textContent = error.message; }
+  finally { detailBusy = false; if (detailDirty) refreshDetail(); }
+}
+// 배경 일의 초는 받아 둔 값에서만 늘린다. 도는 일을 보고 있을 때만 다음 1초를 기다린다.
+function jobStatus(job) {
+  const seconds = Math.max(0, Math.floor((job.seconds || 0) + (job.status === 'running' ? elapsedSeconds() : 0)));
+  const word = job.reason || {running:'도는 중', done:'끝(종료 0)', failed:'실패(종료 ' + job.code + ')', stopped:'멈춤', timeout:'시간 넘김', interrupted:'중단'}[job.status] || job.status;
+  return word + ' · ' + seconds + (job.status === 'running' ? '초째' : '초');
+}
+function jobCard(job) {
+  const box = node('div', null, 'card job-card'); box.dataset.job = job.id;
+  const title = node('strong'), status = node('p', '', 'muted'), command = node('p', '', 'job-command'), error = node('p', '', 'message'); error.setAttribute('role', 'status');
+  const output = button('출력', () => openJob(job.id));
+  const stop = button('멈춤', async () => {
+    if (!view.armed) { view.armed = true; stop.textContent = '한 번 더 누르면 멈춘다'; return; }
+    stop.disabled = true;
+    try { await api('/api/job/stop', {id:job.id}); scheduleState(); }
+    catch (failure) { error.textContent = failure.message; stop.disabled = false; }
+  });
+  const actions = node('div', null, 'actions'); actions.append(output, stop); box.append(title, status, command, actions, error);
+  const view = {box, title, status, command, stop, armed:false}; return view;
+}
+function updateJobs() {
+  if (programStopped) return;
+  const rows = (state.jobs || []).filter(job => job.role === selected), ids = new Set(rows.map(job => job.id)), box = $('jobs');
+  for (const [id, view] of jobNodes) if (!ids.has(id)) { view.box.remove(); jobNodes.delete(id); }
+  rows.forEach((job, index) => {
+    let view = jobNodes.get(job.id); if (!view) { view = jobCard(job); jobNodes.set(job.id, view); }
+    view.title.textContent = job.name; view.status.textContent = jobStatus(job); view.command.textContent = job.command.slice(0, 80);
+    view.stop.hidden = job.status !== 'running';
+    if (box.children[index] !== view.box) box.insertBefore(view.box, box.children[index] || null);
+  });
+  updateAges(); updateClock();
+}
+async function readJob() {
+  const id = outputJob, version = ++outputVersion; $('job-reload').disabled = true; $('job-error').textContent = '';
+  try { const result = await api('/api/job?id=' + encodeURIComponent(id) + '&lines=200'); if (version === outputVersion) $('job-text').textContent = result.text || '(출력이 없다)'; }
+  catch (error) { if (version === outputVersion) $('job-error').textContent = error.message; }
+  finally { if (version === outputVersion) $('job-reload').disabled = false; }
+}
+function openJob(id) {
+  outputJob = id; $('job-title').textContent = '배경 일 출력 · ' + id; $('job-text').textContent = '';
+  $('job-output').showModal(); readJob();
+}
+// ── 바뀐 코드(작업 폴더에서 마지막 커밋과 달라진 파일 · 보일 때만 받는다) ──────────────────
+function changesVisible() { return panelVisible() && !$('pane-changes').hidden; }
+function resetChanges() { changesVersion++; changeNodes.clear(); $('changes').replaceChildren(); $('changes-summary').textContent = ''; $('changes-error').textContent = ''; }
+function diffBlock(diff) {
+  const out = document.createDocumentFragment();
+  if (diff.binary) { out.append(node('p', '글이 아닌 파일이라 차이를 보이지 않는다', 'muted')); return out; }
+  if (!/^[+\- ]/m.test(diff.text)) { out.append(node('p', diff.status === 'A' ? '빈 파일이다' : '줄 차이가 없다', 'muted')); return out; }   // 줄이 하나도 없다(빈 새 파일 · 모드만 바뀜)
+  const box = node('div', null, 'diff'); let before = 0, after = 0;
+  for (const line of diff.text.split('\n')) {
+    const row = node('div', null, 'dl'), sign = line[0]; let number = '', mark = '', text = line.slice(1);
+    if (sign === '@') { const found = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line); if (found) { before = Number(found[1]); after = Number(found[2]); } row.classList.add('hunk'); text = line; }
+    else if (sign === '+') { row.classList.add('add'); number = after++; mark = '+'; }
+    else if (sign === '-') { row.classList.add('del'); number = before++; mark = '−'; }
+    else if (sign === '\\') { row.classList.add('hunk'); text = '(끝에 줄 바꿈 없음)'; }
+    else { number = after++; before++; }
+    row.append(node('span', String(number), 'no'), node('span', mark, 'sign'), node('span', text)); box.append(row);
+  }
+  out.append(box); if (diff.truncated) out.append(node('p', '차이가 커서 앞부분만 보인다', 'muted'));
+  return out;
+}
+async function loadChange(path, view) {
+  const signature = view.signature, version = changesVersion;
+  if (view.loaded === signature) return;
+  try {
+    const diff = await api('/api/change?path=' + encodeURIComponent(path));
+    if (version !== changesVersion || view.signature !== signature) return;
+    view.loaded = signature; view.body.replaceChildren(diffBlock(diff));
+  } catch (error) { if (version === changesVersion) view.body.replaceChildren(node('p', error.message, 'message')); }
+}
+function changeRow(file) {
+  const box = node('details', null, 'change'), summary = node('summary'), name = node('span', null, 'path'), tag = node('span', '', 'tag'), count = node('span', null, 'count'), body = node('div');
+  const slash = file.path.lastIndexOf('/');
+  name.append(node('b', file.path.slice(slash + 1)), node('span', slash < 0 ? '' : '  ' + file.path.slice(0, slash), 'muted')); name.title = file.path;
+  summary.append(icon('chevron'), name, tag, count); box.append(summary, body);
+  const view = {box, tag, count, body, signature:'', loaded:''};
+  box.addEventListener('toggle', () => { if (box.open) loadChange(file.path, view); });
+  changeNodes.set(file.path, view); return view;
+}
+function showChanges(listed) {
+  const box = $('changes'), role = current(); $('changes-error').textContent = listed.error || '';
+  if (!listed.git) { changeNodes.clear(); $('changes-summary').textContent = ''; box.replaceChildren(...(listed.error ? [] : [node('p', 'git 저장소의 뿌리가 아니라서 바뀐 코드를 볼 수 없다', 'muted')])); return; }
+  $('changes-summary').textContent = [listed.branch, '파일 ' + (listed.files.length + listed.more), '+' + listed.adds + ' −' + listed.dels + (listed.more ? ' (앞 ' + listed.files.length + '개)' : ''), listed.scope && role ? role.name + '의 쓰기 범위 안' : ''].filter(Boolean).join(' · ');
+  const paths = new Set(listed.files.map(file => file.path));
+  for (const [path, view] of changeNodes) if (!paths.has(path)) { view.box.remove(); changeNodes.delete(path); }
+  listed.files.forEach((file, index) => {
+    const view = changeNodes.get(file.path) || changeRow(file), signature = JSON.stringify(file);
+    if (view.signature !== signature) {
+      view.signature = signature; view.tag.textContent = file.status === 'A' ? '새 파일' : file.status === 'D' ? '지움' : '';
+      view.tag.hidden = !view.tag.textContent; view.tag.className = 'tag ' + (file.status === 'D' ? 'minus' : 'plus');
+      view.count.replaceChildren(...(file.binary ? [node('span', '바이너리', 'muted')] : [node('span', '+' + (file.adds == null ? '?' : file.adds), 'plus'), node('span', ' −' + (file.dels == null ? '?' : file.dels), 'minus')]));
+      if (view.box.open) loadChange(file.path, view);          // 펼쳐 둔 파일은 바뀌면 다시 받는다
+    }
+    if (box.children[index] !== view.box) box.insertBefore(view.box, box.children[index] || null);
+  });
+  while (box.children.length > listed.files.length) box.lastElementChild.remove();
+  if (!listed.files.length) box.append(node('p', '바뀐 파일이 없다', 'muted'));
+  else if (listed.more) box.append(node('p', '파일이 ' + listed.more + '개 더 있다 — 앞의 ' + listed.files.length + '개만 보인다', 'muted'));
+}
+async function refreshChanges() {
+  if (!selected || !state || !changesVisible()) return;
+  if (changesBusy) { changesDirty = true; return; }
+  changesBusy = true; changesDirty = false; const name = selected, version = changesVersion;
+  try { const listed = await api('/api/changes?role=' + encodeURIComponent(name)); if (name === selected && version === changesVersion) showChanges(listed); }
+  catch (error) { if (name === selected && version === changesVersion) $('changes-error').textContent = error.message; }
+  finally { changesBusy = false; if (changesDirty) refreshChanges(); }
+}
+$('changes-refresh').addEventListener('click', refreshChanges);
+async function loadTask(id, view) {
+  try {
+    const task = await api('/api/task?id=' + encodeURIComponent(id));
+    view.full.textContent = (task.result || '(아직 결과가 없다)') + (task.wrote && task.wrote.length ? '\n\n도구로 쓴 파일:\n' + task.wrote.join('\n') : '');
+    for (const round of task.reviews || []) {
+      view.full.append(node('div', 'r' + round.n + (round.adopted ? ' 채택' : ' 비채택 — ' + round.why)));
+      if (round.snapshot) for (const path of round.files || []) {
+        if (/\.(png|jpe?g|gif|webp)$/i.test(path)) view.full.append(picture(round.snapshot + '/' + path));
+      }
+    }
+  }
+  catch (error) { view.full.textContent = error.message; }
+}
+// ── 화면 바꾸기: PC는 양옆 칸을 접고 펴고, 폰은 목록 · 대화 · 패널 가운데 하나를 보인다 ──
+function show(view) { app.dataset.view = view; updateJobs(); if (view === 'panel') { refreshDetail(); refreshChanges(); } if (view === 'chat' && followChat) scrollBottom(); }
+$('side-open').addEventListener('click', () => { if (phone.matches) show('list'); else { app.dataset.side = app.dataset.side === 'off' ? '' : 'off'; updateClock(); } });
+$('side-close').addEventListener('click', () => show('chat'));
+$('panel-open').addEventListener('click', () => { if (phone.matches) show('panel'); else { app.dataset.panel = app.dataset.panel === 'off' ? '' : 'off'; refreshDetail(); refreshChanges(); updateJobs(); } });
+$('panel-close').addEventListener('click', () => { if (phone.matches) show('chat'); else { app.dataset.panel = 'off'; updateJobs(); } });
+phone.addEventListener('change', () => { closeMenu(); refreshDetail(); refreshChanges(); if (state) updateJobs(); });
+// 배경 일의 출력 대화상자(패널 묶음에는 함수만 둔다 — 듣는 것은 여기서 건다)
+$('job-reload').addEventListener('click', readJob);
+$('job-output').addEventListener('close', () => { if (!$('job-output').open) { outputJob = null; outputVersion++; } });
+function select(name) {
+  if (!state || !state.roles.some(r => r.name === name)) return;
+  closeMenu();
+  if (name !== selected) {
+    if (recording) micFinish(true); else micCancel();             // PC 녹음은 원래 세션에 받아 적고, 브라우저 듣기는 끊는다
+    if (selected) drafts.set(selected, $('text').value);          // 적던 글은 세션마다 따로 둔다
+    selected = name; $('text').value = drafts.get(name) || '';
+    openTalk(); resetDetail(); resetChanges(); render(); grow();
+    receiveTalk().catch(error => message(error.message)); refreshChanges();
+  }
+  if (phone.matches) show('chat');
+}
+// ── 세션 메뉴(멈춤 · 끄기/켜기 · 새로 시작) ──────────────────────────────────
+function closeMenu(refocus) {
+  if (!menuAnchor) return;
+  const anchor = menuAnchor; menuAnchor = null; $('menu').hidden = true; $('menu').replaceChildren();
+  anchor.setAttribute('aria-expanded','false'); if (refocus) anchor.focus();
+}
+function toggleMenu(anchor, name) {
+  if (menuAnchor === anchor) { closeMenu(true); return; }
+  closeMenu();
+  const role = state && state.roles.find(r => r.name === name); if (!role) return;
+  const menu = $('menu'), busy = role.status === 'working' || role.status === 'waiting' || role.queue > 0;
+  const item = (text, action, className) => { const b = button(text, action, 'menu-item' + (className ? ' ' + className : '')); b.setAttribute('role','menuitem'); menu.append(b); return b; };
+  item('멈춤', () => { closeMenu(); act('/api/stop', {role:name}); }).disabled = !busy;
+  if (!role.lead) item(role.off ? '켜기' : '끄기', () => { closeMenu(); act('/api/role', {action:role.off ? 'on' : 'off', name}); });
+  if (!role.off) {
+    let armed = false;
+    const reset = item('새로 시작', () => {
+      if (!armed) { armed = true; reset.textContent = '한 번 더 누르면 인계를 지난 것으로 옮기고 세션을 비운다'; return; }
+      closeMenu(); act('/api/role', {action:'reset', name});
+    }, 'danger');
+    reset.disabled = busy;
+  }
+  menuAnchor = anchor; anchor.setAttribute('aria-expanded','true'); menu.hidden = false;
+  const rect = anchor.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(rect.right - width, innerWidth - width - 8)) + 'px';
+  menu.style.top = (rect.bottom + height + 8 > innerHeight ? Math.max(8, rect.top - height - 4) : rect.bottom + 4) + 'px';
+  const first = menu.querySelector('button:not(:disabled)'); if (first) first.focus();
+}
+$('session-more').addEventListener('click', () => { if (selected) toggleMenu($('session-more'), selected); });
+document.addEventListener('pointerdown', event => { if (menuAnchor && !$('menu').contains(event.target) && !menuAnchor.contains(event.target)) closeMenu(); }, true);
+document.addEventListener('keydown', event => {
+  if (!menuAnchor) return;
+  if (event.key === 'Escape') { event.preventDefault(); closeMenu(true); return; }
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  const items = [...$('menu').querySelectorAll('button:not(:disabled)')]; if (!items.length) return;
+  const at = items.indexOf(document.activeElement); event.preventDefault();
+  items[event.key === 'ArrowDown' ? (at + 1) % items.length : at <= 0 ? items.length - 1 : at - 1].focus();
+});
+window.addEventListener('resize', () => closeMenu());
+$('roles').addEventListener('scroll', () => closeMenu());
+// ── 상태 받기 · 이벤트 흐름 ──────────────────────────────────────────────────
+function render() {
+  if (programStopped) return;
+  if (!state) return;
+  updateRoles(); updateBar(); updateComposer(); updateDecisions(); updateNotices(); updateLive(); updateLimits(); updateSettings(); updateNow(); updateJobs();
+  updateTaskStates();
+  if (panelVisible() && detailSignature !== detailKey()) refreshDetail();
+}
+async function receiveState() {
+  const version = visibilityVersion;
+  const received = await api('/api/state');
+  if (programStopped || document.hidden || version !== visibilityVersion) return;
+  state = received; jobsAt = performance.now(); $('project').textContent = state.project; document.title = state.project;
+  clockPausedAt = connectionLost || document.hidden ? jobsAt : null;
+  for (const [name, saved] of [...talks]) {
+    const role = state.roles.find(r => r.name === name);
+    if (!role || saved.off !== !!role.off) forgetTalk(name);
+  }
+  if (!selected || !state.roles.some(r => r.name === selected)) {          // 처음이거나 고른 역할이 사라졌다 — 총괄을 고른다
+    selected = state.roles.some(r => r.name === state.lead) ? state.lead : state.roles.length ? state.roles[0].name : null;
+    openTalk(); resetDetail(); resetChanges(); talkDirty = true;
+  }
+  render();
+}
+function scheduleState(withTalk = false) {
+  if (programStopped) return;
+  stateDirty = true; if (withTalk) talkDirty = true;
+  if (document.hidden || stateTimer !== null || stateBusy) return;
+  stateTimer = setTimeout(async () => {
+    if (programStopped) return;
+    stateTimer = null; stateBusy = true; stateDirty = false;
+    try { await receiveState(); if (talkDirty) { talkDirty = false; await receiveTalk(); } }
+    catch (error) { stateDirty = false; talkDirty = false; message(error.message); }
+    finally { stateBusy = false; if (stateDirty || talkDirty) scheduleState(); }
+  }, 150);
+}
+async function connect() {
+  if (programStopped) return;
+  const version = ++visibilityVersion;
+  if (source) source.close(); source = null;
+  try {
+    await receiveState(); await receiveTalk(); talkDirty = false;
+    if (programStopped || document.hidden || version !== visibilityVersion) return;
+    talkEventSeq = talkEventSeq === null ? state.seq : Math.min(talkEventSeq, state.seq);
+    source = new EventSource('/api/stream?after=' + talkEventSeq + (key ? '&k=' + encodeURIComponent(key) : ''));
+    // 이벤트가 올 때만 상태를 다시 받는다. 고른 세션의 이벤트면 대화도 이어 받는다.
+    source.onmessage = event => {
+      let got; try { got = JSON.parse(event.data); } catch (_) { return; }
+      talkEventSeq = got.seq;
+      const data = got.data || {};
+      if (got.kind === 'custom.changed') { detailSignature = ''; detailDirty = true; }
+      if (got.kind === 'role.changed' && (data.reset || (talks.has(got.role) && talks.get(got.role).off !== !!data.off))) forgetTalk(got.role);
+      if (got.kind === 'job.started' || got.kind === 'job.finished') scheduleState();
+      if (got.kind === 'check.started' || got.kind === 'check.finished' || got.kind === 'review.started' || got.kind === 'review.finished') detailSignature = '';
+      scheduleState(got.role === selected || (got.kind === 'chat' && selected === state.lead));
+      if (got.kind === 'turn' || got.kind === 'artifact' || got.kind === 'task.finished') refreshChanges();          // 턴이 끝나면 바뀐 코드도 다시 본다(보일 때만)
+    };
+    source.onerror = () => { setConnectionLost(true); message('연결을 다시 잇는 중이다'); };
+    let opened = false;
+    source.onopen = () => { setConnectionLost(false); message(''); scheduleState(true); if (opened) refreshChanges(); opened = true; };
+  } catch (error) { setConnectionLost(true); message(error.message); }
+}
+document.addEventListener('visibilitychange', () => {
+  if (programStopped) return;
+  if (document.hidden) {
+    if (jobTimer !== null) clearTimeout(jobTimer); jobTimer = null;
+    updateLive();
+    visibilityVersion++; if (source) source.close(); source = null;
+    if (stateTimer !== null) clearTimeout(stateTimer); stateTimer = null;
+  } else connect();
+});
+// ── 입력칸 ───────────────────────────────────────────────────────────────────
+function grow() { const text = $('text'); text.style.height = 'auto'; text.style.height = Math.min(text.scrollHeight, Math.round(innerHeight * .4)) + 'px'; }
+function showAttachments() {
+  $('attachments').replaceChildren();
+  attachments.forEach(item => {
+    const wrap = node('div', null, 'attachment'), img = node('img'); img.src = item.url; img.alt = item.file.name;
+    const remove = button('빼기', () => { URL.revokeObjectURL(item.url); attachments = attachments.filter(a => a !== item); showAttachments(); });
+    remove.setAttribute('aria-label', item.file.name + ' 빼기'); wrap.append(img, remove); $('attachments').append(wrap);
+  }); updateComposer();
+}
+function addFiles(files) {
+  if (sending) return;
+  const role = current(); if (!role || !role.lead) { message('그림은 총괄에게만 보낸다'); return; }
+  let error = '';
+  for (const file of files) {
+    if (!/\.(png|jpe?g|gif|webp)$/i.test(file.name)) { error = 'png · jpg · jpeg · gif · webp 그림만 넣는다'; continue; }
+    if (file.size > 8 * 1024 * 1024) { error = '그림은 장당 8MB까지 넣는다'; continue; }
+    if (attachments.length >= 4) { error = '그림은 4장까지 넣는다'; continue; }
+    attachments.push({file, url:URL.createObjectURL(file)});
+  }
+  message(error); showAttachments();
+}
+$('image-add').addEventListener('click', () => $('image-files').click());
+$('image-files').addEventListener('change', event => { addFiles(event.target.files); event.target.value = ''; });
+$('composer').addEventListener('dragover', event => { event.preventDefault(); $('composer').classList.add('drag'); });
+$('composer').addEventListener('dragleave', () => $('composer').classList.remove('drag'));
+$('composer').addEventListener('drop', event => { event.preventDefault(); $('composer').classList.remove('drag'); addFiles(event.dataTransfer.files); });
+$('text').addEventListener('paste', event => {
+  const role = current(); if (!role || !role.lead) return;          // 그림은 총괄에게만 — 다른 역할에게는 글만 붙는다
+  const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+  if (files.length) { event.preventDefault(); addFiles(files); }
+});
+function base64(file) {
+  return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result.split(',', 2)[1]); reader.onerror = () => reject(new Error('그림을 읽지 못했다')); reader.readAsDataURL(file); });
+}
+// 총괄에게는 say(그림도), 다른 역할에게는 send(글만)로 보낸다.
+$('composer').addEventListener('submit', async event => {
+  event.preventDefault(); const role = current(); if (sending || composing || !role) return;
+  if (recording || converting) {
+    if (recording) micFinish();
+    message('받아 적은 글이 들어오면 다시 보낸다'); return;
+  }
+  micCancel();                                                    // 보낸 뒤에 늦게 온 말이 빈 입력칸에 들어가지 않게
+  const text = $('text').value, name = role.name, pictures = role.lead ? attachments : [];
+  if (!text.trim() && !pictures.length) { message(role.lead ? '글이나 그림을 넣는다' : '글을 넣는다'); return; }
+  sending = true; updateComposer(); message('');
+  try {
+    if (role.lead) {
+      const images = await Promise.all(pictures.map(async item => ({name:item.file.name, data:await base64(item.file)})));
+      await api('/api/say', {text, images}); attachments.forEach(item => URL.revokeObjectURL(item.url)); attachments = []; showAttachments();
+    } else await api('/api/send', {to:name, text});
+    if (selected === name) { $('text').value = ''; grow(); followChat = true; } else drafts.delete(name);
+    scheduleState(true);
+  } catch (error) { message(error.message); }
+  finally { sending = false; updateComposer(); }
+});
+$('text').addEventListener('input', grow);
+$('text').addEventListener('compositionstart', () => { composing = true; });
+$('text').addEventListener('compositionend', () => { composing = false; });
+// PC에서는 Enter 로 보낸다(Shift+Enter 는 줄 바꿈 · 한글을 짜는 중이면 보내지 않는다). 손가락으로 쓰는 기기에서는 Enter 가 줄 바꿈이다.
+$('text').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !touch.matches && !event.isComposing && !composing && event.keyCode !== 229) { event.preventDefault(); $('composer').requestSubmit(); }
+});
+$('stop').addEventListener('click', () => { if (selected) act('/api/stop', {role:selected}); });
+// ── 음성 입력(11-16 사용자 「클로드 마이크랑 동일한 방식으로」) ──────────────────────────────────────────
+// 마이크를 누르면 듣고, 말하는 대로 입력칸에 글이 들어가고, 다시 누르면 멈춘다. 보내기는 사람이 누른다(스스로 보내지 않는다).
+// PC에 모델이 있으면 소리를 WAV로 보내 이 PC에서 받아쓴다. 없으면 기존 브라우저 음성 인식을 쓴다.
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listening = null, recording = null, converting = null, micBound = false;
+function micPC() {
+  return state && state.voice === 'pc' && navigator.mediaDevices && window.isSecureContext;
+}
+function micUpdate() {
+  $('mic').hidden = !(micPC() || (Speech && window.isSecureContext));
+  if (!$('mic').hidden && !micBound) {
+    $('mic').addEventListener('click', () => {
+      if (converting) return;
+      if (recording) return micFinish();
+      if (listening) listening.stop(); else return micStart();
+    });
+    micBound = true;
+  }
+}
+function micShow(on) {
+  const mic = $('mic'), label = converting ? '글로 바꾸는 중' : on ? '듣는 중 — 누르면 멈춘다' : '음성 입력';
+  mic.classList.toggle('busy', !!converting); mic.setAttribute('aria-busy', converting ? 'true' : 'false');
+  mic.classList.toggle('on', on); mic.setAttribute('aria-pressed', on ? 'true' : 'false'); mic.setAttribute('aria-label', label); mic.title = label;
+}
+function micCancel() {                                   // 명시적으로 녹음을 버리거나 브라우저 듣기를 끊는다
+  const capture = recording; recording = null;
+  if (capture) micRelease(capture);
+  const recognition = listening; listening = null; micShow(false);
+  if (recognition) { try { recognition.abort(); } catch (_) {} }
+}
+function micRelease(capture) {
+  clearTimeout(capture.timer); if (capture.warm) clearTimeout(capture.warm);
+  micReleaseRecorder(capture);
+  if (capture.processor) { capture.processor.onaudioprocess = null; capture.processor.disconnect(); capture.processor = null; }
+  if (capture.source) { capture.source.disconnect(); capture.source = null; }
+  if (capture.stream) { capture.stream.getTracks().forEach(track => track.stop()); capture.stream = null; }
+  if (capture.context) { capture.context.close().catch(() => {}); capture.context = null; }
+}
+function micReleaseRecorder(capture) {
+  const recorder = capture.recorder; capture.recorder = null;
+  if (!recorder) return;
+  recorder.ondataavailable = recorder.onstop = recorder.onerror = null;
+  if (recorder.state !== 'inactive') { try { recorder.stop(); } catch (_) {} }
+}
+async function micRecord() {
+  const capture = {session:selected, chunks:[], frames:0}; recording = capture;
+  try {
+    capture.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}});
+    if (recording !== capture) { micRelease(capture); return; }
+    // 공개 주소처럼 왕복이 느린 길에서는 올리는 크기가 기다리는 시간이다 — 11-16 실측 324KB 에 10.8초
+    try {
+      const Recorder = window.MediaRecorder;
+      const mimeType = Recorder && ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find(type => Recorder.isTypeSupported(type));
+      if (mimeType) {
+        const recorder = capture.recorder = new Recorder(capture.stream, {mimeType, audioBitsPerSecond:16000});
+        capture.mimeType = mimeType;
+        recorder.ondataavailable = event => {
+          if ((recording === capture || converting === capture) && event.data.size) capture.chunks.push(event.data);
+        };
+        recorder.start();
+      }
+    } catch (_) { micReleaseRecorder(capture); capture.chunks = []; }
+    if (!capture.recorder) {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      let context;
+      try {
+        context = capture.context = new Context({sampleRate:16000});
+        capture.source = context.createMediaStreamSource(capture.stream);
+      } catch (_) {
+        if (capture.context) {
+          const failed = capture.context; capture.context = null;
+          await failed.close().catch(() => {});
+        }
+        if (recording !== capture) return;
+        context = capture.context = new Context();
+        capture.source = context.createMediaStreamSource(capture.stream);
+      }
+      capture.rate = context.sampleRate;
+      const processor = capture.processor = context.createScriptProcessor(4096, 1, 1);
+      processor.onaudioprocess = event => {
+        if (recording !== capture) return;
+        const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+        capture.chunks.push(chunk); capture.frames += chunk.length;
+      };
+      capture.source.connect(processor); processor.connect(context.destination);
+      await context.resume();
+    }
+    if (recording !== capture) { micRelease(capture); return; }
+    capture.started = performance.now();
+    // 공개 주소는 왕복이 느려 새 연결을 맺는 데만 4초쯤 걸린다(11-16 실측 4.3초) — 듣는 동안 작은 요청으로 연결을 살려 두고, 올릴 때 그 연결을 다시 쓴다.
+    if (!['127.0.0.1', 'localhost'].includes(location.hostname)) {
+      const warm = () => {
+        if (recording !== capture) return;                 // 듣는 동안에만 — 멈추면 더 보내지 않는다
+        capture.warming = fetch('/favicon.ico', {cache:'no-store'}).catch(() => {});
+        capture.warm = setTimeout(warm, 2500);
+      };
+      warm();
+    }
+    micShow(true); message('');
+    capture.timer = setTimeout(() => { if (recording === capture) return micFinish(); }, 180000);
+  } catch (_) {
+    micRelease(capture);
+    if (recording !== capture) return;
+    recording = null; micShow(false);
+    message('마이크를 쓸 수 없다 — 브라우저에서 이 화면의 마이크를 허용한다');
+  }
+}
+function micWav(capture) {
+  const samples = new Float32Array(capture.frames); let offset = 0;
+  capture.chunks.forEach(chunk => { samples.set(chunk, offset); offset += chunk.length; });
+  const count = Math.floor(samples.length * 16000 / capture.rate), buffer = new ArrayBuffer(44 + count * 2), view = new DataView(buffer);
+  const word = (at, value) => { for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i)); };
+  word(0, 'RIFF'); view.setUint32(4, buffer.byteLength - 8, true); word(8, 'WAVE'); word(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  word(36, 'data'); view.setUint32(40, count * 2, true);
+  for (let i = 0; i < count; i++) {
+    const position = i * capture.rate / 16000, left = Math.floor(position), part = position - left;
+    const sample = Math.max(-1, Math.min(1, samples[left] * (1 - part) + samples[Math.min(left + 1, samples.length - 1)] * part));
+    view.setInt16(44 + i * 2, Math.round(sample * (sample < 0 ? 32768 : 32767)), true);
+  }
+  return micBase64(buffer);
+}
+function micBase64(buffer) {
+  const bytes = new Uint8Array(buffer); let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return btoa(binary);
+}
+function micAppend(before, heard) {
+  return before.trimEnd() ? before.trimEnd() + ' ' + heard : heard;
+}
+async function micFinish(quiet = false) {
+  const capture = recording; if (!capture) return;
+  recording = null; clearTimeout(capture.timer);
+  if (capture.started === undefined || (performance.now() - capture.started) / 1000 < .3) {
+    micRelease(capture); micShow(false);
+    if (!quiet) message('소리가 너무 짧다'); return;
+  }
+  converting = capture; micShow(false);
+  try {
+    let audio;
+    if (capture.recorder) {
+      await new Promise((resolve, reject) => {
+        capture.recorder.onstop = resolve;
+        capture.recorder.onerror = () => reject(new Error('소리를 글로 바꾸지 못했다'));
+        capture.recorder.stop();
+      });
+      micRelease(capture);
+      audio = micBase64(await new Blob(capture.chunks, {type:capture.mimeType}).arrayBuffer());
+    } else { micRelease(capture); audio = micWav(capture); }
+    capture.chunks = [];
+    if (capture.warming) await capture.warming;            // 가는 중인 작은 요청이 끝나야 그 연결이 비어 다시 쓰인다
+    const reply = await api('/api/dictate', {audio, language:'ko'});
+    if (!reply.ok) throw new Error(reply.error || '소리를 글로 바꾸지 못했다');
+    const heard = (reply.text || '').trim();
+    if (heard) {
+      if (selected !== capture.session) drafts.set(capture.session, micAppend(drafts.get(capture.session) || '', heard));
+      else {
+        const text = $('text'); text.value = micAppend(text.value, heard); grow(); text.dispatchEvent(new Event('input')); text.focus();
+      }
+    } else if (selected === capture.session) message('알아들은 말이 없다');
+  } catch (error) { if (selected === capture.session) message(error.message); }
+  finally { micRelease(capture); capture.chunks = []; converting = null; micShow(false); }
+}
+function micStart() {
+  const text = $('text');
+  if (text.disabled || text.readOnly || converting || recording) return; // 꺼 둔 역할 · 보내는 중
+  if (micPC()) return micRecord();
+  if (!Speech || !window.isSecureContext) return;
+  const recognition = new Speech(), before = text.value ? text.value.replace(/\s+$/, '') + ' ' : '';
+  recognition.lang = navigator.language || 'ko-KR';
+  recognition.interimResults = true;
+  recognition.continuous = !touch.matches;               // 폰 브라우저는 이어 듣기에서 같은 말을 겹쳐 주는 일이 있어 한 마디씩 듣는다
+  recognition.onresult = event => {
+    if (listening !== recognition) return;
+    let heard = '';
+    for (let i = 0; i < event.results.length; i++) heard += event.results[i][0].transcript;
+    text.value = before + heard.replace(/^\s+/, ''); grow();
+  };
+  recognition.onerror = event => {
+    const why = {'not-allowed':'마이크를 쓸 수 없다 — 브라우저에서 이 화면의 마이크를 허용한다', 'service-not-allowed':'이 브라우저에서는 음성 인식을 쓸 수 없다',
+      'audio-capture':'마이크를 찾지 못했다', 'network':'음성 인식 서버에 닿지 못했다', 'no-speech':'', 'aborted':''}[event.error];
+    message(why === undefined ? '음성 입력을 마치지 못했다: ' + event.error : why);
+  };
+  recognition.onend = () => {
+    if (listening !== recognition) return;
+    listening = null; micShow(false); text.dispatchEvent(new Event('input')); text.focus();
+  };
+  try { recognition.start(); } catch (_) { message('음성 입력을 시작하지 못했다'); return; }
+  listening = recognition; micShow(true); message('');
+}
+micUpdate();
+// ── 음성 입력 끝
+window.addEventListener('pagehide', () => { if (source) source.close(); attachments.forEach(item => URL.revokeObjectURL(item.url)); });
+// ── 기기 등록 · 시작 ─────────────────────────────────────────────────────────
+function deviceName() {
+  const agent = navigator.userAgent;
+  const system = /Android/.test(agent) ? 'Android' : /iPhone|iPad/.test(agent) ? 'iPhone' : /Windows/.test(agent) ? 'Windows' : /Mac/.test(agent) ? 'Mac' : /Linux/.test(agent) ? 'Linux' : '기기';
+  const browser = /Edg\//.test(agent) ? 'Edge' : /SamsungBrowser/.test(agent) ? 'Samsung' : /Firefox\//.test(agent) ? 'Firefox' : /Chrome\//.test(agent) ? 'Chrome' : /Safari\//.test(agent) ? 'Safari' : '';
+  return browser ? system + ' · ' + browser : system;
+}
+$('pair').addEventListener('submit', async event => {
+  event.preventDefault(); $('pair-message').textContent = '';
+  try {
+    const response = await fetch('/api/pair', {method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store', body:JSON.stringify({code:$('pair-code').value, name:deviceName()})});
+    const result = await response.json();
+    if (!response.ok || result.ok === false) throw new Error(result.error || '등록하지 못했다');
+    location.reload();
+  } catch (error) { $('pair-message').textContent = error.message || '서버에 연결하지 못했다'; }
+});
+async function begin() {
+  if (!['127.0.0.1','localhost','[::1]'].includes(location.hostname)) $('no-key').textContent = 'PC의 「설정 → 원격 기기」에서 공개 길이 켜져 있는지 확인하고, 그 화면의 주소로 다시 연다';
+  if (!key) {
+    let response;
+    try { response = await fetch('/api/state', {cache:'no-store'}); } catch (_) { $('no-key').hidden = false; return; }
+    if (response.status === 401) { $('pair').hidden = false; $('pair-code').focus(); return; }      // 등록하지 않은 기기
+    if (!response.ok) { $('no-key').hidden = false; return; }                                       // PC에서 접근 값 없이 열었다
+  }
+  if (innerWidth < 1180) app.dataset.panel = 'off';          // 넓은 화면에서만 패널을 펴 둔 채 시작한다
+  app.hidden = false; connect();
+}
+begin();
+})();
+</script>
+</body>
+</html>

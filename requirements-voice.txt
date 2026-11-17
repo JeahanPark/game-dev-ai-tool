@@ -1,0 +1,18 @@
+# 음성 입력(이 PC의 음성 인식) — `python -m gaf voice setup` 이 깐다.
+# 2026-11-16 Windows · Python 3.13 에서 진짜 모델로 돌려 본 판이다(docs/이력/실측-기록.md 17.25).
+# av 의 판이 바뀌면 압축한 소리 풀기(gaf/dictation.py 의 _decode)를 다시 돌려 본다 — probes/voice_live.py.
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+av==19.0.2
+numpy==2.5.5
+onnxruntime==1.32.0
+tokenizers==0.23.3
+huggingface_hub==2.4.0
+hf-xet==1.8.0
+filelock==4.2.10
+fsspec==2026.9.0
+flatbuffers==25.12.19
+protobuf==7.36.2
+PyYAML==6.0.3
+tqdm==4.70.1
+colorama==0.4.6

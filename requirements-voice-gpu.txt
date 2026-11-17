@@ -1,0 +1,4 @@
+# NVIDIA 그래픽 카드로 받아 적을 때만(약 2GB · NVIDIA 라이선스) — `nvidia-smi` 가 있는 PC에서 `gaf voice setup` 이 같이 깐다.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.28.1.4
+nvidia-cuda-nvrtc-cu12==12.9.86
