@@ -328,7 +328,11 @@ def _shortcut(paths, link_dir=None, name=None):
     if not paths.config.is_file():
         print("먼저 python -m gaf init --root <프로젝트 폴더> 로 준비한다", file=sys.stderr)
         return 1
-    icon = run_dir() / "gaf.ico"
+    # AppData(run_dir) 가 아니라 사람마다의 gaf 폴더(~/.gaf)에 둔다 — Microsoft Store 의 파이썬은 AppData 에 쓴 파일을 제 꾸러미 안
+    # (Packages\…\LocalCache)으로 옮겨 써서, 탐색기가 바로 가기의 그림을 못 찾았다(11-18 사용자 「찾았는데 아이콘이 없어」 · 1.3.1).
+    from .paths import user_dir
+
+    icon = user_dir() / "gaf.ico"
     data = desktop.icon_bytes()
     icon.parent.mkdir(parents=True, exist_ok=True)
     if not icon.is_file() or icon.read_bytes() != data:
