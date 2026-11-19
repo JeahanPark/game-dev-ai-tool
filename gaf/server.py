@@ -18,7 +18,7 @@ from pathlib import Path, PureWindowsPath
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
-from . import changes, desktop, launch, library, projects, remote_ops, tailnet
+from . import __version__, changes, desktop, launch, library, projects, remote_ops, tailnet
 from .app import read_server
 from .dictation import Dictation, WAV_MAX_BYTES, STREAM_ID
 from .paths import Paths
@@ -740,9 +740,10 @@ class Server:
         if path == "/api/state":
             # 일의 확인 상태는 역할마다의 `last.verify`(여기)와 `/api/role` 의 일 목록에 있다 — 화면이 자주 부르는 이 길에서
             # 일 파일을 읽지 않는다(11-16 총괄이 뺌: GPT 의 첫 판은 부를 때마다 일 파일 50개를 읽었다).
+            # version: 화면이 「서버가 새 판으로 다시 켜졌다」를 알아채 저를 새로 연다(11-19 폰이 업데이트 전 화면을 그대로 돌림).
             return {**c.snapshot(), "notices": c.notice_views(remote=peer["remote"]),
                     "seq": store.seq, "remote": self._remote_view(peer),
-                    "voice": "pc" if self._voice_ready() else "browser"}
+                    "voice": "pc" if self._voice_ready() else "browser", "version": __version__}
         if path == "/api/dictate":
             return await self._dictate(data)
         if path == "/api/remote":

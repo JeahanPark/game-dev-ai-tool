@@ -1440,6 +1440,45 @@ document.addEventListener('keydown', event => {
 window.addEventListener('resize', () => closeMenu());
 $('roles').addEventListener('scroll', () => closeMenu());
 // ── 상태 받기 · 이벤트 흐름 ──────────────────────────────────────────────────
+// 새 판 알아채기(사용자 11-19 폰 「안나오는데? 정보」 — 업데이트 전에 연 폰 화면이 옛 글을 그대로 돌려 ⋮ 창의 역할 글이 뜨지 않았다):
+// 서버가 다른 판으로 다시 켜지면 하던 것(녹음 · 보내는 중 · 그림 · 메뉴 · 열린 창 · 고르던 답)이 없을 때 화면을 새로 연다 —
+// 하던 것이 있으면 한 줄로 알리고 다음 상태를 받을 때 다시 본다(타이머 없이).
+// 고른 세션과 적던 글은 탭 안(sessionStorage)에 옮겨 새 화면이 되살린다 — 옮길 수 없으면 적던 글이 있는 동안 기다린다.
+let pageVersion = null, carried = takeCarried();
+function takeCarried() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('gaf-reload') || 'null'); sessionStorage.removeItem('gaf-reload');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : null;
+  } catch (_) { return null; }
+}
+function reloadBlocked() {
+  return sending || !!(listening || recording || converting) || attachments.length > 0 || !!menuAnchor        // Custom 고치기는 그 창(dialog)이 열려 있는 것으로 본다
+    || !!document.querySelector('dialog[open], .decision-card [aria-pressed="true"]')
+    || [...document.querySelectorAll('.decision-card input')].some(input => input.value.trim());
+}
+function reloadPage() {
+  const texts = new Map(drafts); if (selected) texts.set(selected, $('text').value);
+  const kept = [...texts].filter(([, text]) => String(text || '').trim());
+  try { sessionStorage.setItem('gaf-reload', JSON.stringify({selected, drafts:kept})); }
+  catch (_) { if (kept.length) return false; }
+  location.reload(); return true;
+}
+function checkVersion() {
+  if (!state.version) return false;
+  if (pageVersion === null) pageVersion = state.version;
+  if (state.version === pageVersion) return false;
+  if (!reloadBlocked() && reloadPage()) return true;
+  message('새 판(' + state.version + ')이 깔렸다 — 하던 것을 마치면 화면을 새로 연다');
+  return false;
+}
+function restoreCarried() {                     // 첫 상태를 받은 뒤 한 번 — 고른 세션은 receiveState 가 먼저 고른다
+  const saved = carried; carried = null;
+  for (const entry of Array.isArray(saved.drafts) ? saved.drafts : []) {
+    const [name, text] = Array.isArray(entry) ? entry : [];
+    if (typeof name !== 'string' || typeof text !== 'string' || !state.roles.some(r => r.name === name)) continue;
+    if (name === selected) { $('text').value = text; grow(); } else drafts.set(name, text);
+  }
+}
 function render() {
   if (programStopped) return;
   if (!state) return;
@@ -1453,15 +1492,18 @@ async function receiveState() {
   if (programStopped || document.hidden || version !== visibilityVersion) return;
   state = received; jobsAt = performance.now(); $('project').textContent = state.project; document.title = state.project;
   clockPausedAt = connectionLost || document.hidden ? jobsAt : null;
+  if (checkVersion()) return;                                               // 새 판이 깔렸다 — 화면을 새로 연다
   syncWaiting();
   for (const [name, saved] of [...talks]) {
     const role = state.roles.find(r => r.name === name);
     if (!role || saved.off !== !!role.off) forgetTalk(name);
   }
-  if (!selected || !state.roles.some(r => r.name === selected)) {          // 처음이거나 고른 역할이 사라졌다 — 총괄을 고른다
-    selected = state.roles.some(r => r.name === state.lead) ? state.lead : state.roles.length ? state.roles[0].name : null;
+  if (!selected || !state.roles.some(r => r.name === selected)) {          // 처음이거나 고른 역할이 사라졌다 — 총괄을 고른다(새 판으로 다시 열었으면 고르던 세션)
+    const kept = carried && state.roles.some(r => r.name === carried.selected) ? carried.selected : null;
+    selected = kept || (state.roles.some(r => r.name === state.lead) ? state.lead : state.roles.length ? state.roles[0].name : null);
     openTalk(); resetDetail(); resetChanges(); talkDirty = true;
   }
+  if (carried) restoreCarried();
   render();
 }
 function scheduleState(withTalk = false) {
