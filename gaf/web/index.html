@@ -30,6 +30,8 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 .icon-button:hover:not(:disabled){color:var(--text);border-color:transparent}
 .icon-button.on,.icon-button.on:hover:not(:disabled){color:var(--bad)}
 .icon-button.busy{opacity:.55}
+#mic-status{display:flex;align-items:center;gap:6px;min-width:0;font-size:calc(12px*var(--u));color:var(--muted)}#mic-text{white-space:nowrap}#mic-status .live-dots{gap:1px}
+#mic-meter{--level:.15;width:28px;height:12px;flex:none;background:var(--work);transform:scaleY(var(--level));transform-origin:center}
 .message{color:var(--warn);white-space:pre-wrap;overflow-wrap:anywhere;font-size:calc(13px*var(--u))}.message:empty{display:none}.warn{color:var(--warn)}
 .need{color:var(--need)}.blocked{color:var(--bad)}.working,.waiting{color:var(--work)}.idle{color:var(--ok)}.off{color:var(--off)}
 .ring{width:14px;height:14px;border:1.5px solid currentColor;border-radius:50%;display:inline-grid;place-items:center;flex:none}.ring::after{content:"";width:4px;height:4px;border-radius:50%;background:currentColor}
@@ -65,6 +67,7 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 .msg{margin:10px 0;min-width:0}.msg.user{display:flex;flex-direction:column;align-items:flex-end;margin:18px 0 12px}
 .msg.user .bubble{background:var(--bubble);border-radius:16px;padding:10px 14px;max-width:min(88%,calc(640px*var(--u)));white-space:pre-wrap;overflow-wrap:anywhere}
 .meta{font-size:calc(12px*var(--u));color:var(--muted)}.msg.user .meta{margin-top:4px}
+.msg.pending .bubble{opacity:.55}.msg.pending .bubble small{display:block}.msg.pending .meta button{font-size:inherit}
 .sub{margin-left:8px;padding-left:12px;border-left:1px solid var(--line)}
 .prose{overflow-wrap:anywhere}.prose p{margin:0 0 10px;white-space:pre-wrap}.prose ul{margin:0 0 10px;padding-left:20px}.prose li{margin:3px 0}.prose .h{font-weight:700}
 .prose>:last-child{margin-bottom:0}.prose code{font-size:.92em;background:#26292B;border-radius:4px;padding:1px 5px}
@@ -96,7 +99,7 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .options{display:flex;flex-wrap:wrap;gap:8px}.option{text-align:left;display:flex;flex-direction:column;gap:2px;flex:1 1 150px;min-height:44px}.option[aria-pressed=true]{border-color:var(--need);background:#2A2114}
 .composer{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px 8px;display:grid;gap:6px}.composer.drag,.composer:focus-within{border-color:var(--focus)}
 #text{width:100%;border:0;background:none;resize:none;padding:4px;min-height:32px;max-height:40dvh;outline:none;display:block}
-.composer-row{display:flex;align-items:center;gap:8px;min-width:0}.composer-row .muted{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mic-control{display:flex;align-items:center;gap:6px;margin-left:auto}.composer-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}.composer-row .muted{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .round{width:calc(34px*var(--u));height:calc(34px*var(--u));padding:0;border-radius:50%;display:inline-grid;place-items:center;flex:none}
 .send{background:var(--text);border-color:var(--text);color:#111}.send:hover:not(:disabled){background:#fff;border-color:#fff}
 .stop{background:var(--bad);border-color:var(--bad);color:#fff}.stop:hover:not(:disabled){background:#F2555A;border-color:#F2555A}
@@ -122,6 +125,7 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .dl.add{background:#14291E}.dl.del{background:#2E1A1C}.dl.hunk{color:var(--muted);background:#1A1C1E}
 .menu{position:fixed;z-index:20;width:calc(240px*var(--u));max-width:calc(100vw - 16px);background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:4px;display:grid;box-shadow:0 8px 24px #0008}
 .menu-item{border:0;background:none;text-align:left;padding:8px 12px;border-radius:6px}.menu-item.danger{color:#FF9A9E}
+.menu.wide{width:min(calc(440px*var(--u)),calc(100vw - 16px))}#menu-items{display:grid}.menu-role{max-height:min(55dvh,calc(520px*var(--u)));overflow-y:auto;border-top:1px solid var(--line);margin-top:4px;padding:8px 10px 6px;font-size:calc(13px*var(--u))}.menu-role .path{margin:0 0 6px;color:var(--muted);font-size:calc(12px*var(--u))}.menu-role .path+.prose~.path{margin-top:12px}
 dialog{color:var(--text);background:var(--card);border:1px solid var(--edge);border-radius:14px;width:min(calc(640px*var(--u)),95vw);max-width:95vw;max-height:92dvh;padding:0;overflow:hidden}dialog::backdrop{background:#0009}
 dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-items:center;gap:16px;padding:14px 20px;flex:none;border-bottom:1px solid var(--line)}.dialog-head button{margin-left:auto}
 .dialog-body{overflow:auto;min-height:0;padding:16px 20px;overscroll-behavior:contain}
@@ -181,11 +185,11 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <section id="main" class="main" aria-label="고른 세션의 대화">
 <header class="bar"><button id="side-open" type="button" class="icon-button" aria-label="세션 목록" data-icon="side"><span id="side-badge" class="badge" hidden></span></button><div class="bar-title"><h2 id="chat-title"></h2><span id="chat-sub" class="muted"></span></div><button id="session-more" type="button" class="icon-button" aria-label="세션 메뉴" aria-haspopup="menu" data-icon="dots"></button><button id="panel-open" type="button" class="icon-button" aria-label="일 · 결과물 · 바뀐 코드 · 인계 · 역할 글" data-icon="panel"></button></header>
 <div id="notices" class="notices"></div>
-<div id="chat" role="log" aria-label="대화" tabindex="0"><div class="column"><button id="older" type="button" class="link" hidden>앞의 대화 더 보기</button><p id="empty" class="empty" hidden></p><div id="rows"></div></div></div>
+<div id="chat" role="log" aria-label="대화" tabindex="0"><div class="column"><button id="older" type="button" class="link" hidden>앞의 대화 더 보기</button><p id="empty" class="empty" hidden></p><div id="rows"></div><div id="outbox"></div></div></div>
 <div class="dock"><div class="column">
 <section id="decisions" hidden aria-label="내가 정할 것"><div id="decision-list"></div></section>
 <div id="live" class="live" hidden><span class="live-dots" aria-hidden="true"><i>•</i><i>•</i><i>•</i></span><span id="live-text"></span></div>
-<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></form>
+<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></div></form>
 <p id="message" class="message" role="status"></p>
 </div></div>
 </section>
@@ -199,7 +203,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div id="pane-role" class="pane" role="tabpanel" aria-labelledby="tab-role" hidden><div id="role-text"></div></div>
 </aside>
 </div>
-<div id="menu" class="menu" role="menu" hidden></div>
+<div id="menu" class="menu" hidden><div id="menu-items" role="menu" aria-label="세션 메뉴"></div><section id="menu-role" class="menu-role" aria-label="역할 글" hidden></section></div>
 <dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
 <dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
 <dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div></div></dialog>
@@ -255,10 +259,11 @@ async function api(path, data) {
   const headers = key ? {'X-GAF-Key':key} : {};
   const options = {headers, cache:'no-store'};
   if (data !== undefined) { headers['Content-Type'] = 'application/json'; options.method = 'POST'; options.body = JSON.stringify(data); }
+  if (path === '/api/dictate' && data?.cancel) options.keepalive = true;
   let response, result;
   try { response = await fetch(path, options); result = await response.json(); }
   catch (_) { throw new Error('서버에 연결하지 못했다'); }
-  if (!response.ok || result.ok === false) {
+  if (!response.ok || (result.ok === false && !(path === '/api/dictate' && data?.stream))) {
     const error = new Error(result.error || '요청을 마치지 못했다');
     if (Array.isArray(result.lines)) error.lines = result.lines;
     throw error;
@@ -337,6 +342,74 @@ function folded(content, text) {
   toggle.setAttribute('aria-expanded','false'); return [wrap, toggle];
 }
 // ── 대화 줄 그리기 ───────────────────────────────────────────────────────────
+// ── 보낸 글 대기: 실제 대화 캐시와 따로 쥐어 역할 이동 · 다시 그리기에 남긴다.
+const outboxes = new Map(), consumedWaiting = new Set();
+function pendingText(item) { return item.text.trim() || '(그림만 보냈다)'; }
+function waitingText(item) { return [...pendingText(item)].slice(0,200).join(''); }
+function renderPending() {
+  const box = $('outbox'); box.replaceChildren();
+  for (const item of outboxes.get(selected) || []) {
+    const row = node('div', null, 'msg user pending'), bubble = node('div', item.text, 'bubble'), meta = node('div', null, 'meta');
+    if (item.pictures && item.pictures.length) bubble.append(node('small', '그림 ' + item.pictures.length + '장'));
+    if (item.status === 'failed') meta.append(button('못 보냄 — 다시 보내기', () => sendPending(item), 'link'));
+    else meta.textContent = item.status === 'received' ? '받음 · 차례를 기다리는 중' : '보냄 · 기다리는 중';
+    row.append(bubble, meta); box.append(row);
+  }
+  if (box.children.length) $('empty').hidden = true;
+}
+function syncWaiting() {
+  const keys = new Set();
+  for (const role of state.roles) {
+    const items = outboxes.get(role.name) || [], counts = new Map();
+    for (const item of items) item.queued = false;
+    for (const wait of role.waiting || []) {
+      const base = role.name + '\n' + wait.at + '\n' + wait.text, n = counts.get(base) || 0, key = base + '\n' + n;
+      counts.set(base,n+1); keys.add(key); if (consumedWaiting.has(key)) continue;
+      let item = items.find(p => p.key === key) || items.find(p => !p.key && p.status !== 'failed' && waitingText(p) === wait.text);
+      if (!item) { item = {name:role.name,text:wait.text,remote:true,after:(talks.get(role.name) || (selected === role.name ? talk : {})).last || 0}; items.push(item); }
+      Object.assign(item,{key,at:wait.at,queued:true,status:'received'});
+    }
+    outboxes.set(role.name,items);
+  }
+  for (const key of consumedWaiting) if (!keys.has(key)) consumedWaiting.delete(key);
+  for (const name of outboxes.keys()) if (!state.roles.some(r => r.name === name)) outboxes.delete(name);
+  renderPending();
+}
+function consumePending(name, rows) {
+  let items = outboxes.get(name) || [];
+  const remove = item => { if (item.key) consumedWaiting.add(item.key); items = items.filter(p => p !== item); };
+  for (const row of rows) {
+    if (row.kind === 'in' && row.from === HUMAN && row.what !== 'task') {
+      const item = items.find(p => row.n > p.after && !(Date.parse(row.ts) < Date.parse(p.at)) &&
+        (p.remote ? waitingText({text:row.text || ''}) === p.text : (row.text || '').trim() === pendingText(p)));
+      if (item) remove(item);
+    }
+    if (row.kind === 'end') for (const item of [...items]) if (row.n > item.after && !item.queued && !['failed','sending'].includes(item.status)) remove(item);
+  }
+  outboxes.set(name,items);
+}
+async function sendPending(item) {
+  if (sending) return;
+  sending = true; item.status = 'sending';
+  if (selected === item.name) { if ($('text').value === item.text) $('text').value = ''; grow(); followChat = true; }
+  else if (drafts.get(item.name) === item.text) drafts.delete(item.name);
+  renderPending(); scrollBottom(); updateComposer(); message('');
+  try {
+    if (item.lead) {
+      const images = await Promise.all(item.pictures.map(async p => ({name:p.file.name,data:await base64(p.file)})));
+      await api('/api/say',{text:item.text,images});
+    } else await api('/api/send',{to:item.name,text:item.text});
+    if (item.pictures) item.pictures.forEach(p => URL.revokeObjectURL(p.url));
+    const role = state.roles.find(r => r.name === item.name);
+    item.status = role && (role.status === 'working' || role.status === 'waiting' || role.queue > 0) ? 'received' : 'sent';
+    scheduleState(true);
+  } catch (error) {
+    item.status = 'failed';
+    if (selected === item.name) { $('text').value = [$('text').value,item.text].filter(Boolean).join('\n'); grow(); }
+    else drafts.set(item.name, [drafts.get(item.name),item.text].filter(Boolean).join('\n'));
+    message(error.message);
+  } finally { sending = false; renderPending(); updateComposer(); }
+}
 function toolKind(name) {
   const n = String(name || '').replace(/^mcp__gaf__/, '').toLowerCase();
   if (/^(read|glob|grep|ls|notebookread|webfetch|websearch|toolsearch)$/.test(n)) return 'read';
@@ -442,6 +515,7 @@ function openTalk() {
   talks.delete(selected); if (selected && current()) talks.set(selected, talk);
   while (talks.size > 8) talks.delete(talks.keys().next().value);
   $('rows').replaceChildren(talk.box); olderBusy = false; followChat = true;
+  renderPending();
   if (talk.last) showEdges(); else { $('older').hidden = true; $('empty').hidden = true; }
   scrollBottom();
   queueMicrotask(fillTalk);
@@ -477,6 +551,7 @@ async function receiveTalk() {
       const result = await api('/api/talk?role=' + encodeURIComponent(name) + '&limit=' + talkLimit() + (talk.last ? '&after=' + talk.last : ''));
       if (version !== talk.version) return;
       const rows = result.rows.filter(row => row.n > talk.last), follow = followChat;
+      consumePending(name, rows);
       if (rows.length) {
         if (talk.last && rows[0].n > talk.last + 1) clearRows();      // 사이가 벌어졌다(오래 떠나 있었다) — 끝 쪽부터 다시 그린다
         if (!talk.first) talk.first = rows[0].n;
@@ -484,7 +559,7 @@ async function receiveTalk() {
         talk.last = rows[rows.length - 1].n; talk.shown += rows.length;
         if (follow) trimRows();
       }
-      showEdges(); updateToolNow(current()); if (follow) scrollBottom();
+      showEdges(); renderPending(); updateToolNow(current()); if (follow) scrollBottom();
     }
   })();
   talk.busy = work;
@@ -623,14 +698,16 @@ function setConnectionLost(lost) {
 }
 function updateClock() {
   if (jobTimer !== null) clearTimeout(jobTimer); jobTimer = null;
-  if (!state || programStopped || document.hidden || connectionLost || clockPausedAt !== null) return;
+  if (!state || programStopped || document.hidden) return;
+  const mic = !!(recording || converting || listening);
+  if (!mic && (connectionLost || clockPausedAt !== null)) return;
   const role = current(), chat = !phone.matches || app.dataset.view === 'chat';
   const list = phone.matches ? app.dataset.view === 'list' : app.dataset.side !== 'off';
   const jobs = panelVisible() && !$('pane-tasks').hidden && (state.jobs || []).some(job => job.role === selected && job.status === 'running');
   const ages = list && (state.decisions.length || state.roles.some(r => r.status === 'working' || r.status === 'waiting')) || chat && state.decisions.some(d => d.from === selected);
-  if (!(chat && role && role.turn_seconds != null) && !jobs && !ages) return;
+  if (!(chat && role && role.turn_seconds != null) && !jobs && !ages && !mic) return;
   jobTimer = setTimeout(() => {
-    jobTimer = null; updateLive(); updateAges();
+    jobTimer = null; updateLive(); updateAges(); micStatus();
     if (jobs) for (const job of state.jobs) { const view = jobNodes.get(job.id); if (view) view.status.textContent = jobStatus(job); }
     updateClock();
   }, 1000);
@@ -647,9 +724,11 @@ function updateLimits() {
 function updateComposer() {
   micUpdate();
   const role = current(), lead = !!role && role.lead, off = !role || role.off;
+  if ([recording, converting].some(c => c && c.sid && !state.roles.some(r => r.name === c.session && !r.off))) micCancel();
   $('text-label').textContent = role ? role.name + '에게' : '';
   $('text').placeholder = !role ? '' : off ? '꺼 둔 역할이다 — 켜면 글을 보낼 수 있다' : lead ? role.name + '에게 맡길 일이나 보탤 말을 적는다' : role.name + '에게 보낼 글을 적는다';
-  $('text').readOnly = sending; $('text').disabled = off; $('send').disabled = sending || off;
+  // 실시간 받아쓰기 동안(듣는 중 · 멈춘 뒤 마지막 글을 받는 중)은 입력칸을 잠근다 — 그사이 친 글이 마지막 글에 덮이지 않게
+  $('text').readOnly = sending || !!recording?.sid || !!converting?.sid; $('text').disabled = off; $('send').disabled = sending || off;
   $('image-add').hidden = !lead; $('image-add').disabled = sending; $('image-files').disabled = sending || !lead; $('attachments').hidden = !lead;
   $('attachments').querySelectorAll('button').forEach(b => { b.disabled = sending; });
   $('model').textContent = role ? [role.engine, role.model].filter(Boolean).join(' · ') : '';
@@ -1294,7 +1373,7 @@ function select(name) {
   if (!state || !state.roles.some(r => r.name === name)) return;
   closeMenu();
   if (name !== selected) {
-    if (recording) micFinish(true); else micCancel();             // PC 녹음은 원래 세션에 받아 적고, 브라우저 듣기는 끊는다
+    if (recording) micFinish(true); else if (!converting) micCancel(); // PC 녹음은 원래 세션에 받아 적는다
     if (selected) drafts.set(selected, $('text').value);          // 적던 글은 세션마다 따로 둔다
     selected = name; $('text').value = drafts.get(name) || '';
     openTalk(); resetDetail(); resetChanges(); render(); grow();
@@ -1302,18 +1381,38 @@ function select(name) {
   }
   if (phone.matches) show('chat');
 }
-// ── 세션 메뉴(멈춤 · 끄기/켜기 · 새로 시작) ──────────────────────────────────
+// ── 세션 메뉴(멈춤 · 끄기/켜기 · 새로 시작 + 그 역할의 역할 글) ──────────────────
+let menuVersion = 0;
 function closeMenu(refocus) {
   if (!menuAnchor) return;
-  const anchor = menuAnchor; menuAnchor = null; $('menu').hidden = true; $('menu').replaceChildren();
+  const anchor = menuAnchor; menuAnchor = null; menuVersion++;
+  $('menu').hidden = true; $('menu').classList.remove('wide'); $('menu-items').replaceChildren(); $('menu-role').replaceChildren(); $('menu-role').hidden = true;
   anchor.setAttribute('aria-expanded','false'); if (refocus) anchor.focus();
+}
+function placeMenu(anchor) {                             // 아래에 들어가면 아래, 아니면 위, 둘 다 안 되면 화면 안 맨 아래쪽
+  const menu = $('menu'), rect = anchor.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
+  const below = rect.bottom + 4, above = rect.top - height - 4;
+  menu.style.left = Math.max(8, Math.min(rect.right - width, innerWidth - width - 8)) + 'px';
+  menu.style.top = (below + height + 8 <= innerHeight ? below : above >= 8 ? above : Math.max(8, innerHeight - height - 8)) + 'px';
+}
+// ⋮ 창에 그 역할의 역할 글 전체를 보인다(사용자 11-19 「얘가 뭐 하는 앤지 내가 모르니까」 → 「그 팝업창 떠서 그 풀 내용을 적어주면 될 것 같은데」)
+async function showRoleText(name, anchor, version) {
+  let detail;
+  try { detail = await api('/api/role?name=' + encodeURIComponent(name)); } catch (_) { return; }      // 못 읽어도 메뉴는 그대로 쓴다
+  if (version !== menuVersion || menuAnchor !== anchor) return;                                        // 그사이 닫았거나 다른 메뉴를 열었다
+  const box = $('menu-role'), body = String(detail.role_text || '').replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, '').trim();
+  box.replaceChildren(node('p', 'team/' + name + '/역할.md', 'path'), prose(body || '(글이 없다)'));
+  for (const layer of detail.custom || []) {
+    if (layer.scope === 'role' && String(layer.text || '').trim()) box.append(node('p', 'Custom · 역할 — ' + layer.path, 'path'), prose(layer.text.trim()));
+  }
+  box.hidden = false; $('menu').classList.add('wide'); placeMenu(anchor);
 }
 function toggleMenu(anchor, name) {
   if (menuAnchor === anchor) { closeMenu(true); return; }
   closeMenu();
   const role = state && state.roles.find(r => r.name === name); if (!role) return;
-  const menu = $('menu'), busy = role.status === 'working' || role.status === 'waiting' || role.queue > 0;
-  const item = (text, action, className) => { const b = button(text, action, 'menu-item' + (className ? ' ' + className : '')); b.setAttribute('role','menuitem'); menu.append(b); return b; };
+  const menu = $('menu'), items = $('menu-items'), busy = role.status === 'working' || role.status === 'waiting' || role.queue > 0;
+  const item = (text, action, className) => { const b = button(text, action, 'menu-item' + (className ? ' ' + className : '')); b.setAttribute('role','menuitem'); items.append(b); return b; };
   item('멈춤', () => { closeMenu(); act('/api/stop', {role:name}); }).disabled = !busy;
   if (!role.lead) item(role.off ? '켜기' : '끄기', () => { closeMenu(); act('/api/role', {action:role.off ? 'on' : 'off', name}); });
   if (!role.off) {
@@ -1324,11 +1423,9 @@ function toggleMenu(anchor, name) {
     }, 'danger');
     reset.disabled = busy;
   }
-  menuAnchor = anchor; anchor.setAttribute('aria-expanded','true'); menu.hidden = false;
-  const rect = anchor.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
-  menu.style.left = Math.max(8, Math.min(rect.right - width, innerWidth - width - 8)) + 'px';
-  menu.style.top = (rect.bottom + height + 8 > innerHeight ? Math.max(8, rect.top - height - 4) : rect.bottom + 4) + 'px';
-  const first = menu.querySelector('button:not(:disabled)'); if (first) first.focus();
+  menuAnchor = anchor; anchor.setAttribute('aria-expanded','true'); menu.hidden = false; placeMenu(anchor);
+  const first = items.querySelector('button:not(:disabled)'); if (first) first.focus();
+  showRoleText(name, anchor, ++menuVersion);
 }
 $('session-more').addEventListener('click', () => { if (selected) toggleMenu($('session-more'), selected); });
 document.addEventListener('pointerdown', event => { if (menuAnchor && !$('menu').contains(event.target) && !menuAnchor.contains(event.target)) closeMenu(); }, true);
@@ -1336,7 +1433,7 @@ document.addEventListener('keydown', event => {
   if (!menuAnchor) return;
   if (event.key === 'Escape') { event.preventDefault(); closeMenu(true); return; }
   if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-  const items = [...$('menu').querySelectorAll('button:not(:disabled)')]; if (!items.length) return;
+  const items = [...$('menu-items').querySelectorAll('button:not(:disabled)')]; if (!items.length) return;
   const at = items.indexOf(document.activeElement); event.preventDefault();
   items[event.key === 'ArrowDown' ? (at + 1) % items.length : at <= 0 ? items.length - 1 : at - 1].focus();
 });
@@ -1356,6 +1453,7 @@ async function receiveState() {
   if (programStopped || document.hidden || version !== visibilityVersion) return;
   state = received; jobsAt = performance.now(); $('project').textContent = state.project; document.title = state.project;
   clockPausedAt = connectionLost || document.hidden ? jobsAt : null;
+  syncWaiting();
   for (const [name, saved] of [...talks]) {
     const role = state.roles.find(r => r.name === name);
     if (!role || saved.off !== !!role.off) forgetTalk(name);
@@ -1458,16 +1556,10 @@ $('composer').addEventListener('submit', async event => {
   micCancel();                                                    // 보낸 뒤에 늦게 온 말이 빈 입력칸에 들어가지 않게
   const text = $('text').value, name = role.name, pictures = role.lead ? attachments : [];
   if (!text.trim() && !pictures.length) { message(role.lead ? '글이나 그림을 넣는다' : '글을 넣는다'); return; }
-  sending = true; updateComposer(); message('');
-  try {
-    if (role.lead) {
-      const images = await Promise.all(pictures.map(async item => ({name:item.file.name, data:await base64(item.file)})));
-      await api('/api/say', {text, images}); attachments.forEach(item => URL.revokeObjectURL(item.url)); attachments = []; showAttachments();
-    } else await api('/api/send', {to:name, text});
-    if (selected === name) { $('text').value = ''; grow(); followChat = true; } else drafts.delete(name);
-    scheduleState(true);
-  } catch (error) { message(error.message); }
-  finally { sending = false; updateComposer(); }
+  const item = {name,text,pictures,lead:role.lead,after:talk.last,status:'sending'};
+  outboxes.set(name,[...(outboxes.get(name) || []),item]);
+  if (role.lead) { attachments = []; showAttachments(); }
+  await sendPending(item);
 });
 $('text').addEventListener('input', grow);
 $('text').addEventListener('compositionstart', () => { composing = true; });
@@ -1479,9 +1571,45 @@ $('text').addEventListener('keydown', event => {
 $('stop').addEventListener('click', () => { if (selected) act('/api/stop', {role:selected}); });
 // ── 음성 입력(11-16 사용자 「클로드 마이크랑 동일한 방식으로」) ──────────────────────────────────────────
 // 마이크를 누르면 듣고, 말하는 대로 입력칸에 글이 들어가고, 다시 누르면 멈춘다. 보내기는 사람이 누른다(스스로 보내지 않는다).
-// PC에 모델이 있으면 소리를 WAV로 보내 이 PC에서 받아쓴다. 없으면 기존 브라우저 음성 인식을 쓴다.
+// PC에 모델이 있으면 압축 덩이를 이어 보내 이 PC에서 받아쓴다. 없으면 기존 브라우저 음성 인식을 쓴다.
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 let listening = null, recording = null, converting = null, micBound = false;
+let micPhase = '', micSince = 0, meterFrame = null;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const meterStyle = [...document.styleSheets[0].cssRules].find(rule => rule.selectorText === '#mic-meter').style;
+function micStatus() {
+  const phase = converting && (!converting.sid || converting.finalizing) ? '글로 바꾸는 중' : recording && recording.started !== undefined || listening ? '듣는 중' : '';
+  if (phase !== micPhase) { micPhase = phase; micSince = performance.now(); }
+  $('mic-status').hidden = !phase;
+  $('mic-meter').hidden = !(recording || listening)?.analyser;
+  $('mic-dots').hidden = phase !== '글로 바꾸는 중';
+  $('mic-status').classList.toggle('paused', document.hidden);
+  $('mic-text').textContent = phase ? phase + ' · ' + Math.floor((performance.now() - micSince) / 1000) + '초' : '';
+}
+function micMeterFrame() {
+  if (meterFrame !== null) cancelAnimationFrame(meterFrame); meterFrame = null;
+  const capture = recording || listening;
+  if (!capture || !capture.analyser || document.hidden || reducedMotion.matches) { meterStyle.setProperty('--level','.15'); return; }
+  capture.analyser.getByteTimeDomainData(capture.levels);
+  let sum = 0; for (const sample of capture.levels) sum += ((sample - 128) / 128) ** 2;
+  meterStyle.setProperty('--level',String(Math.max(.15,Math.min(1,Math.sqrt(sum / capture.levels.length) * 4))));
+  meterFrame = requestAnimationFrame(micMeterFrame);
+}
+async function micMeter(capture) {
+  try {
+    if (!capture.stream) capture.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
+    if (capture !== recording && capture !== listening) { micRelease(capture); return; }
+    if (!capture.context) {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      capture.context = new Context(); capture.source = capture.context.createMediaStreamSource(capture.stream);
+    }
+    capture.analyser = capture.context.createAnalyser(); capture.analyser.fftSize = 256;
+    capture.levels = new Uint8Array(capture.analyser.fftSize); capture.source.connect(capture.analyser);
+    capture.context.resume().catch(() => {});
+  } catch (_) {}                         // 막대를 못 그려도 녹음은 계속한다.
+}
+reducedMotion.addEventListener('change', micMeterFrame);
+document.addEventListener('visibilitychange', () => { micMeterFrame(); micStatus(); updateClock(); });
 function micPC() {
   return state && state.voice === 'pc' && navigator.mediaDevices && window.isSecureContext;
 }
@@ -1500,16 +1628,26 @@ function micShow(on) {
   const mic = $('mic'), label = converting ? '글로 바꾸는 중' : on ? '듣는 중 — 누르면 멈춘다' : '음성 입력';
   mic.classList.toggle('busy', !!converting); mic.setAttribute('aria-busy', converting ? 'true' : 'false');
   mic.classList.toggle('on', on); mic.setAttribute('aria-pressed', on ? 'true' : 'false'); mic.setAttribute('aria-label', label); mic.title = label;
+  micStatus(); micMeterFrame(); updateClock(); updateComposer();
 }
 function micCancel() {                                   // 명시적으로 녹음을 버리거나 브라우저 듣기를 끊는다
   const capture = recording; recording = null;
-  if (capture) micRelease(capture);
+  if (capture) { micForget(capture); micRelease(capture); }
+  if (converting?.sid) { const pending = converting; converting = null; micForget(pending); micRelease(pending); pending.stopped?.(); }
   const recognition = listening; listening = null; micShow(false);
-  if (recognition) { try { recognition.abort(); } catch (_) {} }
+  if (recognition) { micRelease(recognition); try { recognition.abort(); } catch (_) {} }
 }
+function micForget(capture) {
+  capture.cancelled = true;
+  capture.chunks = [];
+  if (capture.sid) api('/api/dictate', {stream:capture.sid, at:0, cancel:true}).catch(() => {});
+}
+window.addEventListener('pagehide', micCancel);
 function micRelease(capture) {
   clearTimeout(capture.timer); if (capture.warm) clearTimeout(capture.warm);
   micReleaseRecorder(capture);
+  if (capture.analyser) { capture.analyser.disconnect(); capture.analyser = null; }
+  if (!(recording || listening) || recording === capture || listening === capture) { if (meterFrame !== null) cancelAnimationFrame(meterFrame); meterFrame = null; }
   if (capture.processor) { capture.processor.onaudioprocess = null; capture.processor.disconnect(); capture.processor = null; }
   if (capture.source) { capture.source.disconnect(); capture.source = null; }
   if (capture.stream) { capture.stream.getTracks().forEach(track => track.stop()); capture.stream = null; }
@@ -1521,8 +1659,9 @@ function micReleaseRecorder(capture) {
   recorder.ondataavailable = recorder.onstop = recorder.onerror = null;
   if (recorder.state !== 'inactive') { try { recorder.stop(); } catch (_) {} }
 }
-async function micRecord() {
-  const capture = {session:selected, chunks:[], frames:0}; recording = capture;
+async function micRecord(warming) {
+  const capture = {session:selected, before:$('text').value, chunks:[], frames:0, at:0, next:0, modelWarming:true}; recording = capture;
+  capture.modelWarm = Promise.resolve(warming).finally(() => { capture.modelWarming = false; });
   try {
     capture.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}});
     if (recording !== capture) { micRelease(capture); return; }
@@ -1532,13 +1671,16 @@ async function micRecord() {
       const mimeType = Recorder && ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find(type => Recorder.isTypeSupported(type));
       if (mimeType) {
         const recorder = capture.recorder = new Recorder(capture.stream, {mimeType, audioBitsPerSecond:16000});
+        capture.sid = [...crypto.getRandomValues(new Uint8Array(16))].map(n => n.toString(16).padStart(2,'0')).join('');
         capture.mimeType = mimeType;
         recorder.ondataavailable = event => {
-          if ((recording === capture || converting === capture) && event.data.size) capture.chunks.push(event.data);
+          if (!capture.cancelled && (recording === capture || converting === capture) && event.data.size) {
+            capture.chunks.push(event.data); if (recording === capture) micSend(capture);
+          }
         };
-        recorder.start();
+        recorder.start(1000);
       }
-    } catch (_) { micReleaseRecorder(capture); capture.chunks = []; }
+    } catch (_) { micReleaseRecorder(capture); capture.sid = null; capture.chunks = []; }
     if (!capture.recorder) {
       const Context = window.AudioContext || window.webkitAudioContext;
       let context;
@@ -1564,13 +1706,15 @@ async function micRecord() {
       capture.source.connect(processor); processor.connect(context.destination);
       await context.resume();
     }
+    await micMeter(capture);
     if (recording !== capture) { micRelease(capture); return; }
     capture.started = performance.now();
     // 공개 주소는 왕복이 느려 새 연결을 맺는 데만 4초쯤 걸린다(11-16 실측 4.3초) — 듣는 동안 작은 요청으로 연결을 살려 두고, 올릴 때 그 연결을 다시 쓴다.
     if (!['127.0.0.1', 'localhost'].includes(location.hostname)) {
       const warm = () => {
         if (recording !== capture) return;                 // 듣는 동안에만 — 멈추면 더 보내지 않는다
-        capture.warming = fetch('/favicon.ico', {cache:'no-store'}).catch(() => {});
+        if (!capture.request && !capture.modelWarming && !capture.warming)
+          capture.warming = fetch('/favicon.ico', {cache:'no-store'}).catch(() => {}).finally(() => { capture.warming = null; });
         capture.warm = setTimeout(warm, 2500);
       };
       warm();
@@ -1608,43 +1752,100 @@ function micBase64(buffer) {
 function micAppend(before, heard) {
   return before.trimEnd() ? before.trimEnd() + ' ' + heard : heard;
 }
+function micDraw(capture, heard, final = false) {
+  const value = heard ? micAppend(capture.before, heard) : capture.before;
+  if (selected !== capture.session) { if (final) drafts.set(capture.session, value); return; }
+  if (!final && recording !== capture) return;
+  const text = $('text'); text.value = value; grow(); text.setSelectionRange(value.length, value.length);
+  if (final) { text.dispatchEvent(new Event('input')); text.focus(); }
+}
+function micSend(capture, final = false) {
+  if (capture.request) return capture.request;
+  if (capture.cancelled || capture.broken || (!final && (recording !== capture || capture.next === capture.chunks.length))) return;
+  const chunks = capture.chunks.slice(capture.next), blob = new Blob(chunks, {type:capture.mimeType});
+  capture.request = (async () => {
+    try {
+      await capture.modelWarm; if (capture.warming) await capture.warming;
+      const chunk = micBase64(await blob.arrayBuffer());
+      if (capture.cancelled) return;
+      if (final) { capture.finalizing = true; micShow(false); }
+      const reply = await api('/api/dictate', {stream:capture.sid, at:capture.at, chunk, language:'ko', ...(final ? {final:true} : {})});
+      capture.at += blob.size; capture.next += chunks.length;
+      if (capture.cancelled) return;
+      if (reply.lost) capture.broken = true;
+      else if (reply.ok && !final) micDraw(capture, (reply.text || '').trim());
+      return reply;
+    } catch (_) { capture.broken = true; }
+    finally {
+      capture.request = null;
+      if (!final && recording === capture && !capture.broken && !capture.cancelled && capture.next < capture.chunks.length) micSend(capture);
+    }
+  })();
+  return capture.request;
+}
 async function micFinish(quiet = false) {
   const capture = recording; if (!capture) return;
   recording = null; clearTimeout(capture.timer);
   if (capture.started === undefined || (performance.now() - capture.started) / 1000 < .3) {
-    micRelease(capture); micShow(false);
+    micForget(capture); micRelease(capture); micShow(false); $('text').focus();
     if (!quiet) message('소리가 너무 짧다'); return;
   }
-  converting = capture; micShow(false);
+  converting = capture; if (capture.sid) capture.finalizing = true;      // 누른 순간부터 「글로 바꾸는 중」
+  micShow(false); $('text').focus();
   try {
     let audio;
     if (capture.recorder) {
       await new Promise((resolve, reject) => {
-        capture.recorder.onstop = resolve;
+        capture.stopped = resolve; capture.recorder.onstop = resolve;
         capture.recorder.onerror = () => reject(new Error('소리를 글로 바꾸지 못했다'));
         capture.recorder.stop();
       });
       micRelease(capture);
+      if (capture.sid) {
+        if (capture.request) await capture.request;
+        if (capture.cancelled) return;
+        const reply = await micSend(capture, true);
+        if (capture.cancelled) return;
+        if (!capture.broken) {
+          if (!reply?.ok) throw new Error(reply?.error || '소리를 글로 바꾸지 못했다');
+          const heard = (reply.text || '').trim(); micDraw(capture, heard, true);
+          if (!heard && selected === capture.session) message('알아들은 말이 없다');
+          return;
+        }
+        // 연결을 잃은 녹음은 멈춘 뒤 전체 소리로 다시 받아쓴다.
+        api('/api/dictate', {stream:capture.sid, at:0, cancel:true}).catch(() => {});
+        capture.finalizing = true; micShow(false);
+      }
       audio = micBase64(await new Blob(capture.chunks, {type:capture.mimeType}).arrayBuffer());
     } else { micRelease(capture); audio = micWav(capture); }
     capture.chunks = [];
     if (capture.warming) await capture.warming;            // 가는 중인 작은 요청이 끝나야 그 연결이 비어 다시 쓰인다
     const reply = await api('/api/dictate', {audio, language:'ko'});
+    if (capture.cancelled) return;
     if (!reply.ok) throw new Error(reply.error || '소리를 글로 바꾸지 못했다');
     const heard = (reply.text || '').trim();
+    if (capture.sid) {
+      micDraw(capture, heard, true);
+      if (!heard && selected === capture.session) message('알아들은 말이 없다');
+      return;
+    }
     if (heard) {
       if (selected !== capture.session) drafts.set(capture.session, micAppend(drafts.get(capture.session) || '', heard));
       else {
         const text = $('text'); text.value = micAppend(text.value, heard); grow(); text.dispatchEvent(new Event('input')); text.focus();
       }
     } else if (selected === capture.session) message('알아들은 말이 없다');
-  } catch (error) { if (selected === capture.session) message(error.message); }
-  finally { micRelease(capture); capture.chunks = []; converting = null; micShow(false); }
+  } catch (error) { if (!capture.cancelled && selected === capture.session) message(error.message); }
+  finally { micRelease(capture); capture.chunks = []; if (converting === capture) converting = null; micShow(!!recording || !!listening); }
 }
 function micStart() {
   const text = $('text');
   if (text.disabled || text.readOnly || converting || recording) return; // 꺼 둔 역할 · 보내는 중
-  if (micPC()) return micRecord();
+  if (micPC()) {
+    const warming = api('/api/dictate', {warm:true}).catch(() => {}); // 누르는 순간 일꾼 · 모델을 연다
+    return micRecord(warming);
+  }
+  // 브라우저 음성 인식 길은 데우지 않고 소리 막대도 두지 않는다 — 같은 마이크를 두 번 잡으면 폰 브라우저의 듣기가 끊길 수 있다(권장 · 못 재 봄)
   if (!Speech || !window.isSecureContext) return;
   const recognition = new Speech(), before = text.value ? text.value.replace(/\s+$/, '') + ' ' : '';
   recognition.lang = navigator.language || 'ko-KR';
@@ -1663,7 +1864,7 @@ function micStart() {
   };
   recognition.onend = () => {
     if (listening !== recognition) return;
-    listening = null; micShow(false); text.dispatchEvent(new Event('input')); text.focus();
+    listening = null; micRelease(recognition); micShow(false); text.dispatchEvent(new Event('input')); text.focus();
   };
   try { recognition.start(); } catch (_) { message('음성 입력을 시작하지 못했다'); return; }
   listening = recognition; micShow(true); message('');

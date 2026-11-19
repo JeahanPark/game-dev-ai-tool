@@ -17,6 +17,7 @@ import site
 import struct
 import subprocess
 import sys
+from time import monotonic
 import wave
 
 from . import paths
@@ -28,6 +29,11 @@ RATE = 16000
 MIN_SECONDS = 0.3
 MAX_SECONDS = 300
 WAV_MAX_BYTES = 10 * 1024 * 1024
+STREAM_WINDOW_SECONDS = 15
+STREAM_TAIL_SECONDS = 4
+STREAM_IDLE_SECONDS = 120
+STREAM_LIMIT = 4
+STREAM_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
 
 
 def voice_dir() -> Path:
@@ -121,7 +127,7 @@ class _AudioError(ValueError):
     """소리 검사에서 정한, 화면에 그대로 보여 줄 까닭."""
 
 
-def _decode(data: bytes):
+def _decode(data: bytes, *, partial=False):
     """압축한 소리(WebM · Ogg · MP4)를 16kHz 모노 float32 표본으로 푼다 — PyAV 를 직접 부른다.
 
     faster_whisper.audio.decode_audio 는 쓰지 않는다. 같이 깔리는 PyAV 의 판에 따라 그 함수가 넘기는
@@ -131,24 +137,29 @@ def _decode(data: bytes):
     import numpy as np
 
     chunks, total, limit = [], 0, int(MAX_SECONDS * RATE)
-    with av.open(io.BytesIO(data), mode="r") as container:
-        stream = next(item for item in container.streams if item.type == "audio")
-        resampler = av.AudioResampler(format="s16", layout="mono", rate=RATE)
+    try:
+        with av.open(io.BytesIO(data), mode="r") as container:
+            stream = next(item for item in container.streams if item.type == "audio")
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=RATE)
 
-        def keep(result):
-            nonlocal total
-            frames = result if isinstance(result, list) else [] if result is None else [result]
-            for frame in frames:
-                chunk = frame.to_ndarray().reshape(-1)
-                total += len(chunk)
-                if total > limit:
-                    # 작은 파일이 몇 시간짜리 소리로 풀리며 메모리를 먹지 않게, 한도를 넘는 순간 멈춘다.
-                    raise _AudioError("소리가 너무 길다 — 5분까지 받는다")
-                chunks.append(chunk)
+            def keep(result):
+                nonlocal total
+                frames = result if isinstance(result, list) else [] if result is None else [result]
+                for frame in frames:
+                    chunk = frame.to_ndarray().reshape(-1)
+                    total += len(chunk)
+                    if total > limit:
+                        raise _AudioError("소리가 너무 길다 — 5분까지 받는다")
+                    chunks.append(chunk)
 
-        for frame in container.decode(stream):
-            keep(resampler.resample(frame))
-        keep(resampler.resample(None))
+            for frame in container.decode(stream):
+                keep(resampler.resample(frame))
+            keep(resampler.resample(None))
+    except (OSError, av.error.FFmpegError):
+        if not partial:
+            raise
+        if not chunks:
+            raise _AudioError("소리를 읽지 못했다") from None
     if not chunks:
         return np.zeros(0, dtype="float32")
     return np.concatenate(chunks).astype("float32") / 32768.0
@@ -185,11 +196,17 @@ def worker_main(stdin, stdout, *, load=None, device=None, decode=None) -> int:
     load = load if load is not None else _load_model
     decode = decode if decode is not None else _decode
     model = None
+    warmed = False
 
-    def recognize(samples, language):
-        segments, _ = model.transcribe(samples, language=language, beam_size=5, vad_filter=True,
-                                       condition_on_previous_text=False, without_timestamps=True)
-        return "".join(segment.text for segment in segments).strip()
+    def recognize(samples, language, *, warm=False, partial=False, offset=0):
+        # 데울 때만 무음도 남겨 VAD와 GPU 추론을 한 번에 준비한다.
+        options = {"vad_parameters": {"threshold": 0.0, "neg_threshold": 0.0, "min_speech_duration_ms": 0}} if warm else {}
+        segments, _ = model.transcribe(samples, language=language, beam_size=1 if partial else 5, vad_filter=True,
+                                       condition_on_previous_text=False, without_timestamps=False, **options)
+        segments = list(segments)
+        return ("".join(segment.text for segment in segments).strip(),
+                [] if warm else [[round(offset + segment.start, 2), round(offset + segment.end, 2),
+                                  segment.text.strip()] for segment in segments])
 
     for line in iter(stdin.readline, ""):
         try:
@@ -200,28 +217,53 @@ def worker_main(stdin, stdout, *, load=None, device=None, decode=None) -> int:
             continue
         reply = {"id": request["id"], "ok": False}
         try:
-            data = base64.b64decode(request.get("audio"), validate=True)
-            seconds, error = check_audio(data)
+            warm = request.get("warm") is True
+            partial = request.get("partial") is True and not warm
+            if warm and warmed:
+                stdout.write(json.dumps({**reply, "ok": True, "warm": True, "device": chosen}) + "\n")
+                stdout.flush()
+                continue
+            data = b"" if warm else base64.b64decode(request.get("audio"), validate=True)
+            seconds, error = (0.5, "") if warm else check_audio(data)
+            if partial and error == "소리가 너무 짧다":
+                error = ""
             if error:
                 raise _AudioError(error)
-            if sniff(data) == "wav":
+            if warm:
+                import numpy as np
+
+                samples = np.zeros(int(RATE * .5), dtype="float32")
+            elif sniff(data) == "wav":
                 import numpy as np
 
                 with wave.open(io.BytesIO(data), "rb") as source:
                     samples = np.frombuffer(source.readframes(source.getnframes()), dtype="<i2").astype("float32") / 32768.0
             else:
-                samples = decode(data)
+                samples = decode(data, partial=True) if partial else decode(data)
                 seconds = len(samples) / RATE
-                if seconds < MIN_SECONDS:
+                if seconds < MIN_SECONDS and not partial:
                     raise _AudioError("소리가 너무 짧다")
                 if seconds > MAX_SECONDS:
                     raise _AudioError("소리가 너무 길다 — 5분까지 받는다")
+            if partial and sniff(data) == "wav":
+                seconds = len(samples) / RATE
+            offset = request.get("offset", 0)
+            offset = min(offset, seconds) if type(offset) in (int, float) and offset >= 0 else 0
+            if warm:
+                offset = 0
+            if offset:
+                samples = samples[int(offset * RATE):]
+            if not warm and len(samples) < int(MIN_SECONDS * RATE):
+                stdout.write(json.dumps({**reply, "ok": True, "text": "", "segments": [],
+                                         "seconds": seconds, "device": chosen}) + "\n")
+                stdout.flush()
+                continue
             language = _language(request.get("language"))
             retry = False
             try:
                 if model is None:
                     model = load(chosen)
-                text = recognize(samples, language)
+                text, segments = recognize(samples, language, warm=warm, partial=partial, offset=offset)
             except Exception:
                 if chosen != "cuda":
                     raise
@@ -231,8 +273,12 @@ def worker_main(stdin, stdout, *, load=None, device=None, decode=None) -> int:
                 model = None
                 chosen = "cpu"
                 model = load(chosen)
-                text = recognize(samples, language)
-            reply.update(ok=True, text=text, seconds=seconds, device=chosen)
+                text, segments = recognize(samples, language, warm=warm, partial=partial, offset=offset)
+            if warm:
+                warmed = True
+                reply.update(ok=True, warm=True, device=chosen)
+            else:
+                reply.update(ok=True, text=text, segments=segments, seconds=seconds, device=chosen)
         except _AudioError as error:
             reply["error"] = str(error)
         except Exception:
@@ -244,7 +290,7 @@ def worker_main(stdin, stdout, *, load=None, device=None, decode=None) -> int:
 
 
 class Dictation:
-    def __init__(self, *, command=None, idle=IDLE_SECONDS):
+    def __init__(self, *, command=None, idle=IDLE_SECONDS, clock=monotonic):
         self.command = command if command is not None else [sys.executable, "-X", "utf8", "-m", "gaf.dictation", "worker"]
         self._lock = asyncio.Lock()
         self._process = None
@@ -253,6 +299,8 @@ class Dictation:
         self._idle_handle = None
         self._idle_tasks = set()
         self._idle_version = 0
+        self.clock = clock
+        self._streams = {}
 
     def _cancel_idle(self):
         self._idle_version += 1
@@ -301,7 +349,10 @@ class Dictation:
         if (not isinstance(response, dict) or response.get("id") != request["id"]
                 or type(response.get("ok")) is not bool):
             raise ValueError("잘못된 일꾼 답")
-        if response["ok"]:
+        if response["ok"] and request.get("warm") is True:
+            if response.get("warm") is not True or response.get("device") not in ("cpu", "cuda"):
+                raise ValueError("잘못된 데우기 답")
+        elif response["ok"]:
             seconds = response.get("seconds")
             if (not isinstance(response.get("text"), str) or type(seconds) not in (int, float)
                     or not 0 <= seconds < float("inf")):
@@ -312,28 +363,106 @@ class Dictation:
         seconds, error = check_audio(wav)
         if error:
             return {"ok": False, "error": error}
+        duration = seconds if sniff(wav) == "wav" else MAX_SECONDS
+        return await self._request({"audio": base64.b64encode(wav).decode("ascii"), "language": _language(language)}, duration)
+
+    async def warm(self) -> dict:
+        """녹음하는 동안 일꾼과 모델을 준비한다. 미설치는 조용히 돌려준다."""
+        if not self.ready():
+            return {"ok": False, "error": "이 PC에 음성 인식이 깔려 있지 않다"}
+        return await self._request({"warm": True})
+
+    async def stream(self, sid, at, chunk, *, final=False, cancel=False, language="ko") -> dict:
+        """녹음의 바이트를 이어 받고, 아직 굳히지 않은 꼬리만 받아쓴다."""
+        now = self.clock()
+        for key, value in list(self._streams.items()):
+            if now - value["touched"] > STREAM_IDLE_SECONDS:
+                self._streams.pop(key, None)
+        if not isinstance(sid, str) or not STREAM_ID.fullmatch(sid):
+            return {"ok": False, "lost": True, "error": "stream 꼴이 맞지 않는다"}
+        if cancel:
+            self._streams.pop(sid, None)
+            async with self._lock:
+                self._streams.pop(sid, None)     # 데우기 뒤 차례를 기다리던 첫 덩이도 거둔다.
+            return {"ok": True}
         self._cancel_idle()
         async with self._lock:
-            self._cancel_idle()
+            def lost(reason):
+                self._streams.pop(sid, None)
+                return {"ok": False, "lost": True, "error": reason}
+
             try:
-                self._id += 1
-                request = {"id": self._id, "audio": base64.b64encode(wav).decode("ascii"), "language": _language(language)}
-                duration = seconds if sniff(wav) == "wav" else MAX_SECONDS
-                reply = await asyncio.wait_for(self._exchange(request), REQUEST_SECONDS + 2 * duration)
-                if reply["ok"]:
-                    return {"ok": True, "text": reply["text"], "seconds": reply["seconds"]}
-                return {"ok": False, "error": str(reply.get("error") or "소리를 글로 바꾸지 못했다")}
-            except asyncio.CancelledError:
-                await self._stop(force=True)
-                raise
-            except TimeoutError:
-                await self._stop(force=True)
-                return {"ok": False, "error": "소리를 글로 바꾸는 시간이 지났다 — 다시 누른다"}
-            except (OSError, ValueError, RecursionError):
-                await self._stop(force=True)
-                return {"ok": False, "error": "음성 인식 일꾼이 멈췄다 — 다시 누른다"}
+                if type(at) is not int or at < 0 or not isinstance(chunk, bytes):
+                    return lost("덩이의 자리나 소리 꼴이 맞지 않는다")
+                state = self._streams.get(sid)
+                if state is None:
+                    if at != 0:
+                        return lost("앞 덩이가 없다")
+                    if sniff(chunk) not in ("webm", "ogg", "mp4"):
+                        return lost("이어 받을 소리 꼴이 맞지 않는다")
+                    if len(self._streams) >= STREAM_LIMIT:
+                        oldest = min(self._streams, key=lambda key: self._streams[key]["touched"])
+                        self._streams.pop(oldest)
+                    state = self._streams[sid] = dict(audio=bytearray(), until=0, committed="", touched=now)
+                audio = state["audio"]
+                if at > len(audio):
+                    return lost("덩이 사이가 비었다")
+                overlap = min(len(chunk), len(audio) - at)
+                if audio[at:at + overlap] != chunk[:overlap]:
+                    return lost("다시 보낸 덩이가 다르다")
+                if len(audio) + len(chunk) - overlap > WAV_MAX_BYTES:
+                    return lost("소리가 너무 크다 — 10MB까지 받는다")
+                audio.extend(chunk[overlap:])
+                state["touched"] = self.clock()
+                reply = await self._request_locked({"audio": base64.b64encode(audio).decode("ascii"),
+                    "offset": state["until"], "partial": not final, "language": _language(language)}, MAX_SECONDS)
+                if not reply["ok"]:
+                    return reply
+                text = " ".join(part.strip() for part in (state["committed"], reply["text"]) if part.strip())
+                if not final and reply["seconds"] - state["until"] > STREAM_WINDOW_SECONDS:
+                    # 마지막 구간은 끝 낱말을 다시 고칠 수 있게 늘 남긴다.
+                    for start, end, words in reply.get("segments", [])[:-1]:
+                        if end > reply["seconds"] - STREAM_TAIL_SECONDS:
+                            break
+                        if end > state["until"]:
+                            state["committed"] = " ".join(part.strip() for part in (state["committed"], words) if part.strip())
+                            state["until"] = end
+                return {"ok": True, "text": text, "seconds": reply["seconds"], "final": final}
             finally:
+                if final:
+                    self._streams.pop(sid, None)
                 self._arm_idle()
+
+    async def _request(self, payload: dict, duration: float = 0) -> dict:
+        self._cancel_idle()
+        async with self._lock:
+            return await self._request_locked(payload, duration)
+
+    async def _request_locked(self, payload: dict, duration: float = 0) -> dict:
+        self._cancel_idle()
+        try:
+            self._id += 1
+            request = {"id": self._id, **payload}
+            reply = await asyncio.wait_for(self._exchange(request), REQUEST_SECONDS + 2 * duration)
+            if reply["ok"]:
+                if payload.get("warm"):
+                    return {"ok": True, "warm": True, "device": reply["device"]}
+                result = {"ok": True, "text": reply["text"], "seconds": reply["seconds"]}
+                if "partial" in payload:
+                    result["segments"] = reply.get("segments", [])
+                return result
+            return {"ok": False, "error": str(reply.get("error") or "소리를 글로 바꾸지 못했다")}
+        except asyncio.CancelledError:
+            await self._stop(force=True)
+            raise
+        except TimeoutError:
+            await self._stop(force=True)
+            return {"ok": False, "error": "소리를 글로 바꾸는 시간이 지났다 — 다시 누른다"}
+        except (OSError, ValueError, RecursionError):
+            await self._stop(force=True)
+            return {"ok": False, "error": "음성 인식 일꾼이 멈췄다 — 다시 누른다"}
+        finally:
+            self._arm_idle()
 
     async def _stop(self, *, force=False):
         process, self._process = self._process, None
@@ -353,8 +482,10 @@ class Dictation:
             await process.wait()
 
     async def close(self):
+        self._streams.clear()
         self._cancel_idle()
         async with self._lock:
+            self._streams.clear()
             self._cancel_idle()
             await self._stop()
         if self._idle_tasks:

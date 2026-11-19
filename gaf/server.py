@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import changes, desktop, launch, library, projects, remote_ops, tailnet
 from .app import read_server
-from .dictation import Dictation, WAV_MAX_BYTES
+from .dictation import Dictation, WAV_MAX_BYTES, STREAM_ID
 from .paths import Paths
 from .remote import Remote, remote_file, read_settings
 
@@ -538,7 +538,8 @@ class Server:
                     await send(200, result, content_type, cache=True)
                 else:
                     status = 200
-                    if isinstance(result, dict) and result.get("ok") is False:
+                    if (isinstance(result, dict) and result.get("ok") is False
+                            and not (path == "/api/dictate" and "stream" in data and data.get("warm") is not True)):
                         error = str(result.get("error") or "")
                         status = 404 if error.startswith(("없는 역할이다:", "없는(또는 이미 답한) 정할 것이다:")) else 400
                     await send(status, result)
@@ -665,6 +666,28 @@ class Server:
 
     async def _dictate(self, data):
         try:
+            if data.get("warm") is True:
+                return await self.dictation.warm()
+            if "stream" in data:
+                sid, at = data["stream"], data.get("at")
+                if not isinstance(sid, str) or not STREAM_ID.fullmatch(sid):
+                    raise RequestError(400, "stream 꼴이 맞지 않는다 — 영문 · 숫자 · _ · - 8~64자")
+                if type(at) is not int or at < 0:
+                    raise RequestError(400, "at 은 음이 아닌 정수여야 한다")
+                for flag in ("final", "cancel"):
+                    if flag in data and type(data[flag]) is not bool:
+                        raise RequestError(400, flag + " 은 bool이어야 한다")
+                try:
+                    encoded = data.get("chunk", "" if data.get("cancel") else None)
+                    if not isinstance(encoded, str):
+                        raise ValueError
+                    chunk = base64.b64decode(encoded, validate=True)
+                except (ValueError, binascii.Error):
+                    raise RequestError(400, "소리 덩이의 base64를 읽지 못했다") from None
+                if not self._voice_ready(refresh=True):
+                    raise RequestError(503, "이 PC에 음성 인식이 깔려 있지 않다 — python -m gaf voice setup")
+                return await self.dictation.stream(sid, at, chunk, final=data.get("final", False),
+                                                  cancel=data.get("cancel", False), language=data.get("language", "ko"))
             try:
                 encoded = data.get("audio")
                 if not isinstance(encoded, str):

@@ -301,6 +301,7 @@ class _Worker:
     session_model: str | None = None
     session_role_model: str = ""    # 세션을 연 때 역할 글의 모델 값이다(빈 글도 그대로 둔다).
     session_instructions: str = ""  # 그 대화를 처음 연 때 실은 지시문의 지문(sha256) · 옛 기록에서 이어 온 대화는 빈 글(모른다)
+    session_instructions_parts: dict = field(default_factory=dict)
     session_opened: float | None = None
     session_tasks: list = field(default_factory=list)
     session_write: tuple = ()       # 세션을 연 때의 쓰기 범위 — 도는 중에 역할 글을 고쳐도 문은 이것으로 본다(11-12 QA 결함-03)
@@ -396,6 +397,7 @@ class Conductor:
         self._human_no = 0                           # 사람의 말(say · 사람의 send · assign · 정할 것의 답)을 센다 — 멈춤이 풀리는 때를 가린다
         self._held_gone: dict[str, tuple[int, str | None]] = {}      # 멈춘 채 폴더가 사라진 역할의 멈춤(이름 → 번호 · 멈춘 이)
         self._letter_chat: dict[str, int] = {}
+        self._quiet_letters: set[str] = set()        # 지휘자가 사람의 답 뒤에 붙여 보낸 결과 글(say human_word=False) — 화면의 「기다리는 내 글」에서 뺀다
         self._titles: dict[str, str] = {}
         self._role_errors: dict[str, str] = {}
         self._side: set[asyncio.Task] = set()
@@ -882,6 +884,11 @@ class Conductor:
             return {"ok": False, "error": str(exc)}
         if human_word:
             self._human_no += 1                  # 사람의 새 말 — 그 전에 멈춘 역할들이 다시 글을 받는다
+        else:
+            # 글의 머리(보낸 이 · 사람)와 건너옴 셈은 그대로 두고, 화면의 「기다리는 내 글」에서만 뺀다
+            if len(self._quiet_letters) > 256:
+                self._quiet_letters &= {item.id for worker in self._workers.values() for item in worker.queue}
+            self._quiet_letters.add(letter.id)
         shown = [path[len(".gaf/"):] if path.startswith(".gaf/") else path for path in inside]
         row = self.store.append_chat("user", text, images=shown)
         self.store.emit("chat", who="user", text=text[:200], n=row["n"])
@@ -2697,7 +2704,8 @@ class Conductor:
                 result = None
                 reason = "멈췄다" if w.stop_requested else "정한 시간 안에 압축을 마치지 못했다"
             if result is None:
-                self._talk(w, "system", text=f"지휘자: 대화를 압축하지 못해({reason}) 다음 글부터 새 세션으로 잇는다")
+                self._talk(w, "system", text=f"지휘자: 대화를 압축하지 못해({reason}) 다음 글부터 새 세션으로 잇는다",
+                           renewal=w.session_id)
                 return False
             before, after = result.get("pre_tokens"), result.get("post_tokens")
             w.context = None                                 # 압축 전의 값을 압축 뒤의 값으로 읽지 않게 — 못 물으면 엔진이 준 값을 쓴다
@@ -2875,9 +2883,11 @@ class Conductor:
             return f"모르는 세기다: {role.effort}", True
         previous_engine = w.session_engine or (roles_mod.read_session(role) or {}).get("engine") or primary.engine
         switched = previous_engine != role.engine
-        resume = None if fresh or switched else self._resume_id(role)
-        # 이어 쓸 수 있었는데 지시문이 달라 새로 여는 것이면 역할의 대화에 한 줄 남긴다(왜 앞 대화를 모르는지 보이게)
-        changed = not fresh and resume is None and self._instructions_changed(role)
+        resume, reasons = (None, []) if fresh or switched else self._resume_decision(role)
+        previous_id = (roles_mod.read_session(role) or {}).get("session_id")
+        if "앞 대화가 길다" in reasons and any(row.get("renewal") == previous_id
+                                              for row in self.store.read_talk(w.name, limit=20)):
+            reasons.remove("앞 대화가 길다")       # 압축 실패 알림이 이미 같은 새 대화를 설명했다.
         error = ""
         for candidate in ((resume, None) if resume else (None,)):
             token = secrets.token_urlsafe(18)    # 세션마다 새 표 — 닫을 때 지운다
@@ -2909,14 +2919,17 @@ class Conductor:
             known = (previous or {}).get("instructions")
             w.session_instructions = ((known if isinstance(known, str) else "") if candidate
                                       else self._instructions_digest(role))      # 줄이기 전의 글로 셈한 지문
+            known_parts = (previous or {}).get("instructions_parts")
+            w.session_instructions_parts = ((known_parts if isinstance(known_parts, dict) else {}) if candidate
+                                            else self._instructions_parts(role))
             if switched:
                 why = reason or (f"{ENGINE_NAMES.get(role.engine, role.engine)} 사용량이 풀려 "
                                  f"{self._engine_label(role)}로 돌아왔다")
                 self._talk(w, "system", text=f"지휘자: {why} — 새 대화로 연다(인계를 읽고 잇는다)")
                 self.store.emit("role.switched", role=w.name, data={"from": previous_engine, "to": role.engine,
                                 "model": role.model, "effort": role.effort, "reason": why})
-            elif changed and not candidate:
-                self._talk(w, "system", text="지휘자: 지시문이 바뀌어(공통 글 · 역할 글) 앞 대화를 잇지 않고 새 대화로 연다")
+            elif reasons and not candidate:
+                self._talk(w, "system", text=f"지휘자: {' · '.join(reasons)} — 앞 대화를 잇지 않고 새 대화로 연다")
             w.session_engine = role.engine
             w.session_write = tuple(role.write)
             w.session_deny = self._deny_tools(role)
@@ -2954,28 +2967,38 @@ class Conductor:
 
     def _resume_id(self, role: Role) -> str | None:
         """설계 §6.3: 이어 갈 세션 id · 새로 열어야 하면 None."""
+        return self._resume_decision(role)[0]
+
+    def _resume_decision(self, role: Role) -> tuple[str | None, list[str]]:
+        """이어 갈지와 새로 열 까닭을 같은 기록 · 기준으로 셈한다."""
         if role.session == "fresh":
-            return None
+            return None, []
         data = roles_mod.read_session(role)
         if not data or data.get("engine") != role.engine:
-            return None
-        if "role_model" in data and data["role_model"] != role.model:
-            return None
-        known = data.get("instructions")
-        if isinstance(known, str) and known and known != self._instructions_digest(role):
-            return None                  # 지시문이 바뀌었다 — 이어 연 대화에는 새 글이 실리지 않는다(설계 §6.3)
+            return None, []
         session_id = data.get("session_id")
         if not isinstance(session_id, str) or not session_id:
-            return None
-        if role.session == "keep":
-            return session_id
-        last = data.get("last_used_at")
-        if type(last) not in (int, float) or self.clock() - last > float(self.config.session["warm_minutes"]) * 60:
-            return None
-        tokens = data.get("context_tokens")
-        if type(tokens) in (int, float) and self._over_limit(tokens, data.get("context_max"), data.get("compact_base")):
-            return None
-        return session_id
+            return None, []
+        reasons = []
+        if "role_model" in data and data["role_model"] != role.model:
+            reasons.append("모델이 바뀌었다")
+        known = data.get("instructions")
+        if isinstance(known, str) and known and known != self._instructions_digest(role):
+            parts, previous = self._instructions_parts(role), data.get("instructions_parts")
+            changed = ([name for name, digest in parts.items() if previous.get(name) != digest]
+                       if isinstance(previous, dict) and all(name in previous for name in parts) else [])
+            label = " · ".join(changed) if changed else "프레임워크 · 공통 글 · 역할 글 · Custom 가운데"
+            reasons.append(f"지시문이 바뀌었다({label})")
+        unknown_time = False
+        if role.session != "keep":
+            last, warm = data.get("last_used_at"), float(self.config.session["warm_minutes"])
+            unknown_time = type(last) not in (int, float)
+            if not unknown_time and self.clock() - last > warm * 60:
+                reasons.append(f"{int((self.clock() - last) // 60)}분 쉬었다({warm:g}분을 넘으면 새로 연다)")
+            tokens = data.get("context_tokens")
+            if type(tokens) in (int, float) and self._over_limit(tokens, data.get("context_max"), data.get("compact_base")):
+                reasons.append("앞 대화가 길다")
+        return (None if reasons or unknown_time else session_id), reasons
 
     def _instructions_digest(self, role: Role) -> str:
         """그 역할에 지금 실을 지시문의 지문(sha256) — `_spec` 이 세션에 넘기는 글과 같은 글로 셈한다."""
@@ -2987,10 +3010,15 @@ class Conductor:
         # 다르지 않아, 줄인 글로 셈하면 「지시문이 바뀌면 새 대화」가 긴 역할에는 서지 않는다(11-16 최종 검수).
         return hashlib.sha256(self._instruction_texts(role, sandbox=folders)[1].encode("utf-8")).hexdigest()
 
-    def _instructions_changed(self, role: Role) -> bool:
-        """세션 기록에 적힌 지시문의 지문이 지금 것과 다른가(기록이 없거나 지문을 모르면 False)."""
-        known = (roles_mod.read_session(role) or {}).get("instructions")
-        return isinstance(known, str) and bool(known) and known != self._instructions_digest(role)
+    def _instructions_parts(self, role: Role) -> dict:
+        """줄이기 전 지시문의 부분별 지문."""
+        try:
+            folders = self._write_paths(role)[0]
+        except OSError:
+            folders = []
+        parts = {}
+        self._instruction_texts(role, sandbox=folders, fingerprints=parts)
+        return parts
 
     def _common_text(self) -> str:
         """team/공통.md 의 글(주석 `<!-- … -->` 은 뺀다 — 사람에게 하는 설명이라 세션에 싣지 않는다)."""
@@ -3046,7 +3074,7 @@ class Conductor:
         """세션에 싣는 지시문(길면 줄인 글)."""
         return self._instruction_texts(role, sandbox)[0]
 
-    def _instruction_texts(self, role: Role, sandbox: list[str] | None = None) -> tuple[str, str]:
+    def _instruction_texts(self, role: Role, sandbox: list[str] | None = None, *, fingerprints=None) -> tuple[str, str]:
         """지시문: 머리말 + 공통 + 역할 + 위키 + Custom + 도구 안내 → (싣는 글, 줄이기 전의 전체 글).
 
         규칙은 여기 실리는 것이 전부다. 엔진 전용 파일(CLAUDE.md · AGENTS.md)과 스킬 · MCP 는 싣지 않는다(11-12 사용자 결정).
@@ -3076,6 +3104,7 @@ class Conductor:
         tail = [(lead_tools.usage(shell, prefix) if role.lead else lead_tools.peer_usage(shell, prefix)).strip()]
         custom = [f"[Custom · {layer['label']} — {layer['path']}]\n{body}"
                   for layer in self._custom_layers(role) if (body := _COMMENT.sub("", layer["text"]).strip())]
+        framework_intro = intro
         if custom:
             intro += "\nCustom 은 사용자가 기본 글에 더한 설정이다 — 어긋나면 뒤에 실린 글을 따른다."
         parts = [intro]
@@ -3083,6 +3112,10 @@ class Conductor:
             parts.append(f"[프로젝트 공통 규칙 — team/{COMMON_FILE}]\n{common}")
         parts.append(f"[역할 글 — team/{role.name}/역할.md]\n{role.body.strip()}")
         wiki = [WIKI_INSTRUCTIONS.strip()] if (self.paths.root / "wiki/index.md").is_file() else []
+        if fingerprints is not None:
+            texts = {"프레임워크": "\n\n".join([framework_intro] + wiki + tail), "공통 글": common,
+                     "역할 글": role.body.strip(), "Custom": "\n\n".join(custom) + intro[len(framework_intro):]}
+            fingerprints.update({name: hashlib.sha256(body.encode("utf-8")).hexdigest() for name, body in texts.items()})
         text = "\n\n".join(parts + wiki + custom + tail)
         if len(text) <= INSTRUCTIONS_MAX:
             return text, text
@@ -3199,6 +3232,7 @@ class Conductor:
             roles_mod.write_session(w.role, {
                 "engine": w.role.engine, "session_id": w.session_id, "model": w.session_model or w.role.model,
                 "role_model": w.session_role_model, "instructions": w.session_instructions,
+                "instructions_parts": w.session_instructions_parts,
                 "opened_at": w.session_opened, "last_used_at": self.clock(),
                 "context_tokens": (w.context or {}).get("tokens"), "context_max": (w.context or {}).get("max"),
                 "compact_base": w.compact_base, "compacted": w.compacted,
@@ -5035,6 +5069,9 @@ class Conductor:
             "status": status, "status_since": w.status_since, **live,
             "reason": reason, "task": task, "now": w.now if w.turning or w.checking else "", "last": w.last,
             "queue": len(w.queue), "session": (w.session_id or "")[:8] or None,
+            "waiting": [{"text": letter.body[:200], "at": self._iso(letter.sent_at)}
+                        for letter in w.queue if letter.sender == HUMAN and letter.human and letter.kind in ("user", "note")
+                        and letter.id not in self._quiet_letters],
             "session_open": w.session is not None,
             "context_pct": round(float(percent), 1) if type(percent) in (int, float) else None,
             "handoff_at": self._iso(handoff[0] / 1e9) if handoff else None, "write": list(role.write),
