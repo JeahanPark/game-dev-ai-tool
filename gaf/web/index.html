@@ -71,6 +71,7 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 .sub{margin-left:8px;padding-left:12px;border-left:1px solid var(--line)}
 .prose{overflow-wrap:anywhere}.prose p{margin:0 0 10px;white-space:pre-wrap}.prose ul{margin:0 0 10px;padding-left:20px}.prose li{margin:3px 0}.prose .h{font-weight:700}
 .prose>:last-child{margin-bottom:0}.prose code{font-size:.92em;background:#26292B;border-radius:4px;padding:1px 5px}
+.prose .table-wrap{overflow-x:auto;margin:0 0 10px}.prose table{border-collapse:collapse;max-width:100%}.prose th,.prose td{border:1px solid var(--edge);padding:4px 8px;text-align:left;vertical-align:top}.prose th{background:var(--hover);font-weight:600}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:10px 14px}
 .card-head{display:flex;gap:10px;justify-content:space-between;font-size:calc(12px*var(--u));color:var(--muted);margin-bottom:4px}.card-title{font-weight:700;margin-bottom:4px;overflow-wrap:anywhere}
 .clamp{max-height:9.3em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 60%,transparent);mask-image:linear-gradient(#000 60%,transparent)}.clamp.open{max-height:none;-webkit-mask-image:none;mask-image:none}
@@ -125,7 +126,7 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .dl.add{background:#14291E}.dl.del{background:#2E1A1C}.dl.hunk{color:var(--muted);background:#1A1C1E}
 .menu{position:fixed;z-index:20;width:calc(240px*var(--u));max-width:calc(100vw - 16px);background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:4px;display:grid;box-shadow:0 8px 24px #0008}
 .menu-item{border:0;background:none;text-align:left;padding:8px 12px;border-radius:6px}.menu-item.danger{color:#FF9A9E}
-.menu.wide{width:min(calc(440px*var(--u)),calc(100vw - 16px))}#menu-items{display:grid}.menu-role{max-height:min(55dvh,calc(520px*var(--u)));overflow-y:auto;border-top:1px solid var(--line);margin-top:4px;padding:8px 10px 6px;font-size:calc(13px*var(--u))}.menu-role .path{margin:0 0 6px;color:var(--muted);font-size:calc(12px*var(--u))}.menu-role .path+.prose~.path{margin-top:12px}
+#menu-items{display:grid}.role-info .path{margin:0 0 6px;color:var(--muted);font-size:calc(12px*var(--u))}.role-info .prose+.path{margin-top:16px}.role-info .prose{margin-top:8px}
 dialog{color:var(--text);background:var(--card);border:1px solid var(--edge);border-radius:14px;width:min(calc(640px*var(--u)),95vw);max-width:95vw;max-height:92dvh;padding:0;overflow:hidden}dialog::backdrop{background:#0009}
 dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-items:center;gap:16px;padding:14px 20px;flex:none;border-bottom:1px solid var(--line)}.dialog-head button{margin-left:auto}
 .dialog-body{overflow:auto;min-height:0;padding:16px 20px;overscroll-behavior:contain}
@@ -203,12 +204,13 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div id="pane-role" class="pane" role="tabpanel" aria-labelledby="tab-role" hidden><div id="role-text"></div></div>
 </aside>
 </div>
-<div id="menu" class="menu" hidden><div id="menu-items" role="menu" aria-label="세션 메뉴"></div><section id="menu-role" class="menu-role" aria-label="역할 글" hidden></section></div>
+<div id="menu" class="menu" hidden><div id="menu-items" role="menu" aria-label="세션 메뉴"></div></div>
 <dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
 <dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
 <dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div></div></dialog>
 <dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
 <dialog id="image-view" aria-label="그림 크게 보기"><div class="dialog-head"><span>그림</span><button type="button" data-close="image-view">닫기</button></div><div class="dialog-body"><img id="large-image" alt="크게 보는 그림"></div></dialog>
+<dialog id="role-info" aria-labelledby="role-info-title"><div class="dialog-head"><h2 id="role-info-title">역할 정보</h2><button type="button" data-close="role-info">닫기</button></div><div class="dialog-body"><p id="role-info-error" class="message" role="status"></p><div id="role-info-body" class="role-info"></div></div></dialog>
 <dialog id="job-output" aria-labelledby="job-title"><div class="dialog-head"><h2 id="job-title">배경 일 출력</h2><button type="button" data-close="job-output">닫기</button></div><div class="dialog-body"><pre id="job-text"></pre><button id="job-reload" type="button">새로 읽기</button><p id="job-error" class="message" role="status"></p></div></dialog>
 <script>
 'use strict';
@@ -318,12 +320,40 @@ function inline(target, text) {
   }
   if (last < text.length) target.append(text.slice(last));
 }
+// 표(11-20 사용자 「이상하게 노출되는데」 — 역할 글 · 대화의 표가 `| 일 | 명령 |` 글자 그대로 보였다): 머리 줄 다음 줄이 구분 줄이면 표다.
+const tableRule = line => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(line) || /^\s*\|\s*:?-+:?\s*\|\s*$/.test(line);
+function tableCells(line) {
+  let rest = line.trim(); const cells = []; let cell = '';
+  if (rest.startsWith('|')) rest = rest.slice(1);
+  if (rest.endsWith('|') && !rest.endsWith('\\|')) rest = rest.slice(0, -1);
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '\\' && rest[i + 1] === '|') { cell += '|'; i++; }
+    else if (rest[i] === '|') { cells.push(cell.trim()); cell = ''; }
+    else cell += rest[i];
+  }
+  cells.push(cell.trim()); return cells;
+}
 function prose(text) {
   const box = node('div', null, 'prose'); let paragraph = [], list = null, fence = null;
   const flush = () => { if (paragraph.length) { const p = node('p'); inline(p, paragraph.join('\n')); box.append(p); paragraph = []; } };
-  for (const line of String(text).replace(/\r/g, '').split('\n')) {
+  const lines = String(text).replace(/\r/g, '').split('\n');
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at];
     if (fence) { if (/^\s*```/.test(line)) { box.append(node('pre', fence.join('\n'))); fence = null; } else fence.push(line); continue; }
     if (/^\s*```/.test(line)) { flush(); list = null; fence = []; continue; }
+    if (line.includes('|') && at + 1 < lines.length && tableRule(lines[at + 1])) {
+      flush(); list = null;
+      const columns = tableCells(line), wrap = node('div', null, 'table-wrap'), table = node('table'), head = node('thead'), body = node('tbody'), top = node('tr');
+      for (const value of columns) { const th = node('th'); inline(th, value); top.append(th); }
+      head.append(top);
+      for (at += 2; at < lines.length && lines[at].trim() && lines[at].includes('|'); at++) {
+        const row = node('tr'), values = tableCells(lines[at]);
+        for (let c = 0; c < columns.length; c++) { const td = node('td'); inline(td, values[c] || ''); row.append(td); }
+        body.append(row);
+      }
+      at--;                                                  // 표 뒤의 줄은 다음 차례에 본다
+      table.append(head, body); wrap.append(table); box.append(wrap); continue;
+    }
     const item = /^\s*[-*•]\s+(.*)$/.exec(line), head = /^#{1,4}\s+(.*)$/.exec(line);
     if (item) { flush(); if (!list) { list = node('ul'); box.append(list); } const li = node('li'); inline(li, item[1]); list.append(li); continue; }
     list = null;
@@ -1394,12 +1424,12 @@ function select(name) {
   }
   if (phone.matches) show('chat');
 }
-// ── 세션 메뉴(멈춤 · 끄기/켜기 · 새로 시작 + 그 역할의 역할 글) ──────────────────
-let menuVersion = 0;
+// ── 세션 메뉴(역할 정보 · 멈춤 · 끄기/켜기 · 새로 시작) ──────────────────────────
+let roleInfoVersion = 0;
 function closeMenu(refocus) {
   if (!menuAnchor) return;
-  const anchor = menuAnchor; menuAnchor = null; menuVersion++;
-  $('menu').hidden = true; $('menu').classList.remove('wide'); $('menu-items').replaceChildren(); $('menu-role').replaceChildren(); $('menu-role').hidden = true;
+  const anchor = menuAnchor; menuAnchor = null;
+  $('menu').hidden = true; $('menu-items').replaceChildren();
   anchor.setAttribute('aria-expanded','false'); if (refocus) anchor.focus();
 }
 function placeMenu(anchor) {                             // 아래에 들어가면 아래, 아니면 위, 둘 다 안 되면 화면 안 맨 아래쪽
@@ -1408,24 +1438,34 @@ function placeMenu(anchor) {                             // 아래에 들어가�
   menu.style.left = Math.max(8, Math.min(rect.right - width, innerWidth - width - 8)) + 'px';
   menu.style.top = (below + height + 8 <= innerHeight ? below : above >= 8 ? above : Math.max(8, innerHeight - height - 8)) + 'px';
 }
-// ⋮ 창에 그 역할의 역할 글 전체를 보인다(사용자 11-19 「얘가 뭐 하는 앤지 내가 모르니까」 → 「그 팝업창 떠서 그 풀 내용을 적어주면 될 것 같은데」)
-async function showRoleText(name, anchor, version) {
+// 역할 정보 창(사용자 11-19 「얘가 뭐 하는 앤지 내가 모르니까」 → 11-20 「버튼중에 역할정보가 있고 그걸 누르면 팝업이 노출되는걸」 ·
+// 「이거랑 동일하게」 — 설정 창과 같은 꼴: 제목 · 닫기는 위에 고정되고 글은 창 안에서 내려 본다)
+async function showRoleInfo(name) {
+  const version = ++roleInfoVersion, box = $('role-info-body');
+  $('role-info-title').textContent = name + ' — 역할 정보'; $('role-info-error').textContent = '';
+  box.replaceChildren(node('p', '읽는 중…', 'path'));
+  if (!$('role-info').open) $('role-info').showModal();
   let detail;
-  try { detail = await api('/api/role?name=' + encodeURIComponent(name)); } catch (_) { return; }      // 못 읽어도 메뉴는 그대로 쓴다
-  if (version !== menuVersion || menuAnchor !== anchor) return;                                        // 그사이 닫았거나 다른 메뉴를 열었다
-  const box = $('menu-role'), body = String(detail.role_text || '').replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, '').trim();
-  box.replaceChildren(node('p', 'team/' + name + '/역할.md', 'path'), prose(body || '(글이 없다)'));
+  try { detail = await api('/api/role?name=' + encodeURIComponent(name)); }
+  catch (error) { if (version === roleInfoVersion) { box.replaceChildren(); $('role-info-error').textContent = error.message; } return; }
+  if (version !== roleInfoVersion) return;                                    // 그사이 닫았거나 다른 역할을 열었다
+  const body = String(detail.role_text || '').replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, '').trim();
+  const engine = [detail.engine, detail.model, detail.effort].filter(Boolean).join(' · ');
+  box.replaceChildren(...(engine ? [node('p', engine, 'path')] : []),
+    node('p', '쓰기 범위: ' + ((detail.write || []).join(', ') || '없음(읽기만)'), 'path'),
+    node('p', 'team/' + name + '/역할.md', 'path'), prose(body || '(글이 없다)'));
   for (const layer of detail.custom || []) {
     if (layer.scope === 'role' && String(layer.text || '').trim()) box.append(node('p', 'Custom · 역할 — ' + layer.path, 'path'), prose(layer.text.trim()));
   }
-  box.hidden = false; $('menu').classList.add('wide'); placeMenu(anchor);
 }
+$('role-info').addEventListener('close', () => { roleInfoVersion++; });
 function toggleMenu(anchor, name) {
   if (menuAnchor === anchor) { closeMenu(true); return; }
   closeMenu();
   const role = state && state.roles.find(r => r.name === name); if (!role) return;
   const menu = $('menu'), items = $('menu-items'), busy = role.status === 'working' || role.status === 'waiting' || role.queue > 0;
   const item = (text, action, className) => { const b = button(text, action, 'menu-item' + (className ? ' ' + className : '')); b.setAttribute('role','menuitem'); items.append(b); return b; };
+  item('역할 정보', () => { closeMenu(); showRoleInfo(name); });
   item('멈춤', () => { closeMenu(); act('/api/stop', {role:name}); }).disabled = !busy;
   if (!role.lead) item(role.off ? '켜기' : '끄기', () => { closeMenu(); act('/api/role', {action:role.off ? 'on' : 'off', name}); });
   if (!role.off) {
@@ -1438,7 +1478,6 @@ function toggleMenu(anchor, name) {
   }
   menuAnchor = anchor; anchor.setAttribute('aria-expanded','true'); menu.hidden = false; placeMenu(anchor);
   const first = items.querySelector('button:not(:disabled)'); if (first) first.focus();
-  showRoleText(name, anchor, ++menuVersion);
 }
 $('session-more').addEventListener('click', () => { if (selected) toggleMenu($('session-more'), selected); });
 document.addEventListener('pointerdown', event => { if (menuAnchor && !$('menu').contains(event.target) && !menuAnchor.contains(event.target)) closeMenu(); }, true);
