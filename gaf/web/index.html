@@ -262,9 +262,20 @@ async function api(path, data) {
   const options = {headers, cache:'no-store'};
   if (data !== undefined) { headers['Content-Type'] = 'application/json'; options.method = 'POST'; options.body = JSON.stringify(data); }
   if (path === '/api/dictate' && data?.cancel) options.keepalive = true;
+  // 읽기(GET)는 20초 넘게 답이 없으면 멈추고 알린 뒤 다시 잇는다 — 공개 주소의 앞단 길이 멈추면 fetch 는 끝없이 기다려
+  // 역할 정보가 「읽는 중…」에 갇혔다(11-20 사용자 「역할정보도 안떠」). 보내기(POST)는 큰 첨부가 오래 걸려 끊지 않는다.
+  let timer = null, timedOut = false;
+  if (data === undefined) {
+    const abort = new AbortController(); options.signal = abort.signal;
+    timer = setTimeout(() => { timedOut = true; abort.abort(); }, 20000);
+  }
   let response, result;
   try { response = await fetch(path, options); result = await response.json(); }
-  catch (_) { throw new Error('서버에 연결하지 못했다'); }
+  catch (_) {
+    if (timedOut) { reconnectLater(); throw new Error('20초 넘게 답이 없다 — 연결을 다시 잇는다'); }
+    throw new Error('서버에 연결하지 못했다');
+  }
+  finally { if (timer !== null) clearTimeout(timer); }
   if (!response.ok || (result.ok === false && !(path === '/api/dictate' && data?.stream))) {
     const error = new Error(result.error || '요청을 마치지 못했다');
     if (Array.isArray(result.lines)) error.lines = result.lines;
@@ -1575,12 +1586,13 @@ function scheduleState(withTalk = false) {
 async function connect() {
   if (programStopped) return;
   const version = ++visibilityVersion;
+  if (reconnectTimer !== null) clearTimeout(reconnectTimer); reconnectTimer = null;
   if (source) source.close(); source = null;
   try {
     await receiveState(); await receiveTalk(); talkDirty = false;
     if (programStopped || document.hidden || version !== visibilityVersion) return;
     talkEventSeq = talkEventSeq === null ? state.seq : Math.min(talkEventSeq, state.seq);
-    source = new EventSource('/api/stream?after=' + talkEventSeq + (key ? '&k=' + encodeURIComponent(key) : ''));
+    const stream = source = new EventSource('/api/stream?after=' + talkEventSeq + (key ? '&k=' + encodeURIComponent(key) : ''));
     // 이벤트가 올 때만 상태를 다시 받는다. 고른 세션의 이벤트면 대화도 이어 받는다.
     source.onmessage = event => {
       let got; try { got = JSON.parse(event.data); } catch (_) { return; }
@@ -1593,16 +1605,30 @@ async function connect() {
       scheduleState(got.role === selected || (got.kind === 'chat' && selected === state.lead));
       if (got.kind === 'turn' || got.kind === 'artifact' || got.kind === 'task.finished') refreshChanges();          // 턴이 끝나면 바뀐 코드도 다시 본다(보일 때만)
     };
-    source.onerror = () => { setConnectionLost(true); message('연결을 다시 잇는 중이다'); };
+    source.onerror = () => {
+      if (stream !== source) return;                                        // 앞서 닫은 연결의 늦은 오류
+      setConnectionLost(true); message('연결을 다시 잇는 중이다');
+      if (stream.readyState === EventSource.CLOSED) reconnectLater();       // 브라우저가 다시 잇기를 그만뒀다(502 같은 답)
+    };
     let opened = false;
-    source.onopen = () => { setConnectionLost(false); message(''); scheduleState(true); if (opened) refreshChanges(); opened = true; };
-  } catch (error) { setConnectionLost(true); message(error.message); }
+    source.onopen = () => { reconnectDelay = 0; setConnectionLost(false); message(''); scheduleState(true); if (opened) refreshChanges(); opened = true; };
+  } catch (error) { setConnectionLost(true); message(error.message); if (version === visibilityVersion) reconnectLater(); }
+}
+// 스스로 다시 잇기 — 공개 주소의 앞단(Tailscale)은 지휘자를 다시 켜는 동안 502 를 돌려주고, EventSource 는 그런 답을 받으면
+// 닫혀(CLOSED) 다시 잇지 않는다. 그래서 창을 옮기거나 새로 고칠 때까지 끊긴 채였다(11-20 사용자 「접속이 안되는것같은데?」).
+// 보이는 동안만 1 → 2 → 4 … 15초 간격으로 다시 잇고, 이어지면 처음부터 센다. 숨기면 멈추고 보일 때 바로 잇는다.
+let reconnectTimer = null, reconnectDelay = 0;
+function reconnectLater() {
+  if (programStopped || document.hidden || reconnectTimer !== null) return;
+  reconnectDelay = Math.min(reconnectDelay ? reconnectDelay * 2 : 1000, 15000);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, reconnectDelay);
 }
 document.addEventListener('visibilitychange', () => {
   if (programStopped) return;
   if (document.hidden) {
     if (jobTimer !== null) clearTimeout(jobTimer); jobTimer = null;
     updateLive();
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer); reconnectTimer = null;
     visibilityVersion++; if (source) source.close(); source = null;
     if (stateTimer !== null) clearTimeout(stateTimer); stateTimer = null;
   } else connect();
