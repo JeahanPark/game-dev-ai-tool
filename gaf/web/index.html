@@ -1458,7 +1458,9 @@ async function showRoleInfo(name) {
     if (layer.scope === 'role' && String(layer.text || '').trim()) box.append(node('p', 'Custom · 역할 — ' + layer.path, 'path'), prose(layer.text.trim()));
   }
 }
-$('role-info').addEventListener('close', () => { roleInfoVersion++; });
+// 닫힌 창에 늦게 온 답만 버린다. 닫고 곧바로 다시 열면 Chrome 의 close 이벤트가 다시 연 뒤에 와서, 새로 연 창의 답까지 버려
+// 「읽는 중…」에 멈췄다(11-20 사용자 「이러는데?」 — 설정 창이 1.0.2 에 겪은 것과 같은 꼴 · resetSettings)
+$('role-info').addEventListener('close', () => { if (!$('role-info').open) roleInfoVersion++; });
 function toggleMenu(anchor, name) {
   if (menuAnchor === anchor) { closeMenu(true); return; }
   closeMenu();
