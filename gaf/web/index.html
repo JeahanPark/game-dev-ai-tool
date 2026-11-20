@@ -777,7 +777,9 @@ function decisionCard(decision) {
 function actionCard(decision) {
   const action = decision.action, commit = action.kind === 'commit', card = node('div', null, 'decision-card action-card');
   const check = action.kind === 'check_add' || action.kind === 'check_remove';
-  card.append(node('strong', (action.kind === 'custom' ? 'Custom 청 · ' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청 · ' : commit ? '커밋 청 · ' : '푸시 청 · ') + decision.from));
+  const review = action.kind === 'review_add' || action.kind === 'review_remove';
+  card.append(node('strong', (action.kind === 'custom' ? 'Custom 청 · ' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청 · '
+    : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청 · ' : commit ? '커밋 청 · ' : '푸시 청 · ') + decision.from));
   const list = node('div', null, 'action-list');
   if (action.kind === 'custom') {
     const text = action.text || '', preview = text.split('\n').slice(0, 8).join('\n').slice(0, 1200);
@@ -788,6 +790,14 @@ function actionCard(decision) {
     card.append(node('p', action.check.name), node('pre', action.check.command),
       node('p', 'when: ' + (action.check.when.join(', ') || '(어떤 파일이든)')),
       node('p', '셸: ' + (action.check.shell || '기본') + ' · 시간 한도: ' + action.check.timeout_min + '분'), node('p', '왜: ' + action.why));
+  } else if (review) {
+    // 기본 검토 규칙(11-20): 이 파일이 바뀌면 지휘자가 늘 검토한다 — 회차마다 검토 세션을 열어 사용량이 든다
+    const r = action.review, words = {area:'넓이 ', lines:'줄 ', chars:'글자 '};
+    const small = Object.entries(r.small || {}).map(([key, value]) => (words[key] || key) + value + (key === 'area' ? '%' : '')).join(' · ');
+    card.append(node('p', r.name), node('p', 'when: ' + r.when.join(', ')), node('p', '검토 역할: ' + r.reviewers.join(', ')),
+      node('p', '볼 파일: ' + (r.files.join(', ') || '(따로 없다 — 바뀐 파일과 답)')), node('p', '기준: ' + (r.brief || '(맡긴 일의 끝 기준)')),
+      node('p', '가벼운 검토(첫 검토자 하나): ' + (small ? small + ' 미만일 때' : '없음 — 늘 전체 검토') + ' · 나란히 견주기: ' + (r.keep_going ? '함' : '안 함')),
+      node('p', '왜: ' + action.why));
   } else if (commit) {
     const counts = action.counts, words = {new:'새', modified:'고침', deleted:'지움'};
     const total = counts.new + counts.modified + counts.deleted;
@@ -1151,8 +1161,11 @@ function detailKey() { const r = current(); return r ? JSON.stringify([r.name, r
 function taskStateText(task, now = '') {
   const status = taskWords[task.status] || task.status, over = !['queued', 'running'].includes(task.status);
   if (over && task.expect_ok === false) return status + ' · 결과물 확인 실패';
-  if (task.review_ok === true) return status + ' · 검토 r' + task.review_best + ' 채택(' + task.reviews + '번 후보)';
-  if (task.review_ok === false) return status + ' · 채택 없음(' + task.reviews + '번 후보)';
+  // 기본 검토(gaf.json 의 reviews — 지휘자가 늘 붙인다 · 11-20): 얼마나 무겁게 봤는지를 같이 보인다
+  const level = {light:' · 기본 검토 가벼움', full:' · 기본 검토 전체'}[task.default_review && task.default_review.level] || '';
+  if (task.default_review && task.default_review.error) return status + ' · 기본 검토 못 돌림';
+  if (task.review_ok === true) return status + ' · 검토 r' + task.review_best + ' 채택(' + task.reviews + '번 후보' + level + ')';
+  if (task.review_ok === false) return status + ' · 채택 없음(' + task.reviews + '번 후보' + level + ')';
   if (task.status === 'running' && task.review_ok === null) return status + ' · 검토 ' + (task.reviews + 1) + '번째 후보';
   if (task.check_ok === true) return status + ' · 검사 통과(' + task.checks + '번째)';
   if (task.check_ok === false) return status + ' · 검사 실패(' + task.checks + '번)';

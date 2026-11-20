@@ -76,6 +76,19 @@ def checks_text(checks, trusted, *, for_lead=False):
     return "\n".join([*(lines or ["기본 검사가 없다"]), "믿음: " + ("됨" if trusted else untrusted)])
 
 
+def reviews_text(reviews, trusted, *, for_lead=False):
+    """기본 검토 규칙 목록(사람 · 총괄이 같이 본다)."""
+    lines = []
+    for r in reviews:
+        small = " · ".join(f"{key} {value:g}" for key, value in r["small"].items()) or "없음(늘 전체)"
+        lines.append(f"기본 검토: {r['name']}\nwhen: {', '.join(r['when'])}\n검토 역할: {', '.join(r['reviewers'])}"
+                     f"\n볼 파일: {', '.join(r['files']) or '(따로 없다 — 바뀐 파일과 답)'}\n기준: {r['brief'] or '(맡긴 일의 끝 기준)'}"
+                     f"\n작음 기준: {small} · 나란히 견주기: {'함' if r['keep_going'] else '안 함'}")
+    untrusted = ("안 됨 — 사람에게 `python -m gaf hooks trust` 로 전체를 확인해 달라고 청한다" if for_lead else
+                 "안 됨 — gaf hooks trust 로 전체를 확인하라")
+    return "\n".join([*(lines or ["기본 검토가 없다"]), "믿음: " + ("됨" if trusted else untrusted)])
+
+
 def verify_word(value, reviewed=False):
     """확인 상태의 한 낱말. 검사 · 결과물 확인은 없었지만 검토 고리가 돈 일은 「검토함」이다(「못 봄」이 아니다)."""
     if reviewed and value == "not_run":
@@ -136,6 +149,32 @@ def review_line(record) -> str:
     return f"검토: {count}번 후보 · 채택 없음"
 
 
+def default_review_line(record) -> str:
+    """기본 검토(gaf.json 의 reviews)가 이 일에서 어떻게 됐나 — 붙지 않은 일은 빈 글."""
+    info = record.get("default_review")
+    if not info:
+        return ""
+    if info.get("skipped"):
+        return "[기본 검토] 사람이 이 일에서 뺐다"
+    if info.get("error"):
+        names = " · ".join(f"「{name}」" for name in info.get("unusable") or [])
+        return f"[기본 검토] {names}을 돌리지 못했다 — {info['error']}"
+    from . import default_review
+
+    rules = info.get("rules") or []
+    if info.get("level") is None:
+        return "[기본 검토] " + " · ".join(f"「{name}」" for name in rules) + " — 바뀐 정도를 재기 전에 끝났다"
+    light = info["level"] == "light"
+    word = "가벼움" if light else "전체"
+    who = f"{info['light']} 하나" if light else " · ".join(record.get("review") or info.get("full") or [])
+    measured = [(name, default_review.measure_text(info["measures"].get(name) or {})) for name in rules]
+    if len(measured) == 1:
+        name, value = measured[0]
+        return f"[기본 검토] 「{name}」 — {word}" + (f"({value})" if value else "") + f" → {who}"
+    parts = " · ".join(f"「{name}」" + (f"({value})" if value else "") for name, value in measured)
+    return f"[기본 검토] {parts} — {word} → {who}"
+
+
 def review_rounds(record) -> str:
     rounds = []
     for row in record.get("reviews") or []:
@@ -185,6 +224,7 @@ _USAGE = """[명령 쓰는 법 — 지휘자가 붙인 글]
 | `gaf team` | 역할마다 상태 · 들고 있는 일 · 줄 길이 · 마지막 결과 · 쓰기 범위 |
 | `gaf assign <역할> "<제목>" "<내용>" [--done-when "<끝 기준>"] [--check "<검사 명령>"] [--check-rounds N] [--check-timeout-min N] [--check-shell bash\\|powershell] [--expect "<결과물 경로,…>"] [--review <검토 역할,…>]` | 일을 맡긴다. 끝나면 「일 끝」 글이 온다 |
 | `gaf check list` · `gaf check add "<이름>" "<명령>" [--when "<글롭,…>"] [--shell bash\\|powershell] [--timeout-min N] --why "<막을 실수>"` · `gaf check remove "<이름>"` | 기본 검사 목록 · 추가/제거 승인 청 |
+| `gaf review list` · `gaf review add "<이름>" --when "<글롭,…>" --reviewers "<검토 역할,…>" [--files "<볼 그림 · 레퍼런스 글롭,…>"] [--brief "<기준>"] [--small-area N] [--small-lines N] [--small-chars N] [--no-keep-going] --why "<왜 늘 검토하나>"` · `gaf review remove "<이름>"` | 기본 검토 목록 · 추가/제거 승인 청 |
 | `SendMessage <받는 이> "<글>" [--reply]` | 일을 새로 만들지 않고 그 역할에게 글을 보낸다(보탤 말 · 물음 · 답). 받는 이가 일하는 중이면 다음 도구 차례에, 쉬는 중이면 그 글로 깨어나 읽는다. 답이 필요하면 `--reply` 를 붙인다(받은 쪽의 마지막 답이 글로 돌아온다) — 알리기만 하면 붙이지 않는다 |
 | `gaf result <일 번호>` | 일 하나의 결과 전문(예: `gaf result t-0003`) |
 | `gaf ask "<물음>" [--option "<보기>"]…` | 사람에게 묻는다 — 화면의 「내가 정할 것」에 뜬다. 물음 번호가 바로 나오고, 사람의 답은 글로 따로 온다(보기는 4개까지 · 없으면 사람이 글로 답한다). 사용자에게 묻는 도구가 따로 있으면 그것을 써도 된다 |
@@ -207,9 +247,12 @@ _USAGE = """[명령 쓰는 법 — 지휘자가 붙인 글]
 - 약속한 파일은 `--expect` 로 적는다. 지휘자는 파일의 존재 · 비어 있지 않음 · 이번 일의 수정을 확인한다(내용은 보지 않는다).
 - 결과의 `[지휘자 확인]` 줄을 본다. 「못 봄」은 통과가 아니다. 확인이 필요하면 검사 명령이나 결과물 경로를 붙여 다시 맡기고, 사람에게도 「확인 못 함」이라고 보고한다.
 - 프레임워크에 **서랍**이 있다 — 미리 써 둔 역할 · 절차 글 · 문서 틀 · 규칙 · 장르 시트 · 엔진 참조다. **프로젝트를 처음 맡았으면 절차 `procedures/project-start` 부터 읽는다**(`gaf library show procedures/project-start`). 새 종류의 일을 받으면 `gaf library list --kind procedures` · `--find <낱말>` 로 맞는 절차 · 틀을 먼저 찾아본다. **다 꺼내지 않는다 — 지금 일에 필요한 것만.** 역할은 `gaf role new <이름> --from <id> --write <범위>` 로 꺼내고(엔진 전문가는 이 프로젝트의 엔진 것만), 절차는 네가 `gaf library show` 로 읽는다. **역할은 서랍을 열지 못한다** — 역할이 볼 틀 · 규칙 · 참조는 `gaf library take` 로 프로젝트 문서(위키가 있으면 `wiki/raw/서랍/…`, 없으면 `docs/서랍/…`)에 먼저 꺼내고, 맡기는 글에 그 경로를 적는다. 서랍 글의 숫자 · 엔진 판 이야기는 시작 값이다 — 프로젝트에서 확인한 값이 앞선다.
-- 눈으로 봐야 하는 결과물(그림 · 맵 · 화면 · 글)은 맡길 때 `--review` 로 검토 역할을 같이 적는다 — 만든 역할이 후보를 낼 때마다 지휘자가 처음 보는 검토 세션들에게 보이고, 막힘이 없고 지금까지 가장 나은 것보다 낫다고 모두 고를 때만 채택한다.
+- **기본 검토**(`gaf review list`)가 있으면 그 규칙에 맞는 파일이 바뀐 일에 지휘자가 늘 검토를 붙인다 — 네가 붙일지 정하지 않고 뺄 수도 없다(빼는 것은 사람만).
+  얼마나 무겁게 할지도 지휘자가 바뀐 정도를 재 정한다(작으면 첫 검토자 하나 · 크면 모두와 나란히 견주기). 결과의 `[기본 검토]` 줄을 본다.
+  눈으로 봐야 하는 종류(그림 · 맵 · 화면 · 연출 · 글)가 늘 나오는데 규칙이 없으면 `gaf review add` 로 규칙을 청한다(사람이 승인해야 들어간다 — 볼 캡처를 만드는 명령은 `gaf check add` 의 기본 검사로 따로 청한다).
+- 규칙이 없는 한 번짜리 일에 검토가 필요하면 맡길 때 `--review` 로 검토 역할을 같이 적는다 — 만든 역할이 후보를 낼 때마다 지휘자가 처음 보는 검토 세션들에게 보이고, 막힘이 없고 지금까지 가장 나은 것보다 낫다고 모두 고를 때만 채택한다.
   채택되지 않으면 까닭을 만든 역할에게 돌려보낸다(연속 네 번 채택되지 않으면 멈춘다). 후보로 볼 그림 · 파일은 `--review-files` 로, 무엇을 볼지는 `--review-brief` 로 준다. 하나가 채택돼도 더 나은 것을 계속 찾게 하려면 `--review-keep-going`.
-  검토 역할은 `gaf role new` 로 미리 만들어 둔다. 회차마다 검토 세션을 새로 여니 사용량이 많이 든다 — 꼭 필요한 일에만 쓴다.
+  검토 역할은 `gaf role new` 로 미리 만들어 둔다. 회차마다 검토 세션을 새로 여니 사용량이 많이 든다.
 - 통과 · 실패가 종료 코드로 나오는 검사(시험 · 빌드 · 검증 스크립트)가 있으면 맡길 때 `--check` 로 같이 준다 — 역할이 끝냈다고 하면 지휘자가 돌려 보고, 실패하면 출력의 끝을 역할에게 돌려보내 고치게 한다(기본 3번까지). 네가 결과를 받아 직접 돌려 보고 다시 맡기지 않아도 된다. 검사 명령은 무엇도 고치지 않는 것이어야 한다.
 - 사람에게 보여 줄 그림 · 영상(검수 요청 등)은 답 글에 경로만 적지 말고 `gaf show` 로 올린다 — 사람은 화면에서 바로 본다.
 - 커밋 · 푸시는 셸의 git 으로 하지 않는다(문이 막는다) — `gaf commit` · `gaf push` 로 청하면 사람이 화면에서 승인할 때 지휘자가 한다. 프로젝트의 규칙(공통.md)이 따로 없으면 사람이 하라고 했을 때만 청한다. 경로는 파일을 골라 적는다(뿌리 전체를 적지 못한다). 청한 뒤 그 파일이 바뀌면 커밋되지 않는다 — 다시 청한다.
@@ -255,6 +298,7 @@ _TOOLS_USAGE = """[도구 쓰는 법 — 지휘자가 붙인 글]
 | `mcp__gaf__team` | 역할마다 상태 · 들고 있는 일 · 줄 길이 · 마지막 결과 · 쓰기 범위 |
 | `mcp__gaf__assign`(role · title · brief · done_when · check · check_rounds · check_timeout_min · check_shell · expect · review · review_files · review_brief · review_keep_going) | 일을 맡긴다. 끝나면 「일 끝」 글이 온다 |
 | `mcp__gaf__check_list`() · `mcp__gaf__check_add`(name · command · when · shell · timeout_min · why) · `mcp__gaf__check_remove`(name) | 기본 검사 목록 · 추가/제거 승인 청 |
+| `mcp__gaf__review_list`() · `mcp__gaf__review_add`(name · when · reviewers · files · brief · small · keep_going · why) · `mcp__gaf__review_remove`(name) | 기본 검토 목록 · 추가/제거 승인 청 |
 | `mcp__gaf__SendMessage`(to · text · reply) | 일을 새로 만들지 않고 그 역할에게 글을 보낸다(보탤 말 · 물음 · 답). 받는 이가 일하는 중이면 다음 도구 차례에, 쉬는 중이면 그 글로 깨어나 읽는다. 답이 필요하면 reply 를 true 로 준다(받은 쪽의 마지막 답이 글로 돌아온다) — 알리기만 하면 빼 둔다 |
 | `mcp__gaf__result`(task) | 일 하나의 결과 전문(예: t-0003) |
 | `mcp__gaf__ask`(question · options) | 사람에게 묻는다 — 화면의 「내가 정할 것」에 뜬다. 물음 번호가 바로 나오고, 사람의 답은 글로 따로 온다(보기는 4개까지 · 없으면 사람이 글로 답한다). 사용자에게 묻는 도구가 따로 있으면 그것을 써도 된다 |
@@ -276,9 +320,12 @@ _TOOLS_USAGE = """[도구 쓰는 법 — 지휘자가 붙인 글]
 - 약속한 파일은 expect 로 적는다. 지휘자는 파일의 존재 · 비어 있지 않음 · 이번 일의 수정을 확인한다(내용은 보지 않는다).
 - 결과의 `[지휘자 확인]` 줄을 본다. 「못 봄」은 통과가 아니다. 확인이 필요하면 검사 명령이나 결과물 경로를 붙여 다시 맡기고, 사람에게도 「확인 못 함」이라고 보고한다.
 - 프레임워크에 **서랍**이 있다 — 미리 써 둔 역할 · 절차 글 · 문서 틀 · 규칙 · 장르 시트 · 엔진 참조다. **프로젝트를 처음 맡았으면 절차 `procedures/project-start` 부터 읽는다**(library_show). 새 종류의 일을 받으면 `mcp__gaf__library_list`(kind: procedures · find: 낱말)로 맞는 절차 · 틀을 먼저 찾아본다. **다 꺼내지 않는다 — 지금 일에 필요한 것만.** 역할은 `mcp__gaf__new_role`(name · template · write)로 꺼내고(엔진 전문가는 이 프로젝트의 엔진 것만), 절차는 네가 `mcp__gaf__library_show`로 읽는다. **역할은 서랍을 열지 못한다** — 역할이 볼 틀 · 규칙 · 참조는 `mcp__gaf__library_take`로 프로젝트 문서(위키가 있으면 `wiki/raw/서랍/…`, 없으면 `docs/서랍/…`)에 먼저 꺼내고, 맡기는 글에 그 경로를 적는다. 서랍 글의 숫자 · 엔진 판 이야기는 시작 값이다 — 프로젝트에서 확인한 값이 앞선다.
-- 눈으로 봐야 하는 결과물(그림 · 맵 · 화면 · 글)은 맡길 때 review 로 검토 역할을 같이 적는다 — 만든 역할이 후보를 낼 때마다 지휘자가 처음 보는 검토 세션들에게 보이고, 막힘이 없고 지금까지 가장 나은 것보다 낫다고 모두 고를 때만 채택한다.
+- **기본 검토**(`mcp__gaf__review_list`)가 있으면 그 규칙에 맞는 파일이 바뀐 일에 지휘자가 늘 검토를 붙인다 — 네가 붙일지 정하지 않고 뺄 수도 없다(빼는 것은 사람만).
+  얼마나 무겁게 할지도 지휘자가 바뀐 정도를 재 정한다(작으면 첫 검토자 하나 · 크면 모두와 나란히 견주기). 결과의 `[기본 검토]` 줄을 본다.
+  눈으로 봐야 하는 종류(그림 · 맵 · 화면 · 연출 · 글)가 늘 나오는데 규칙이 없으면 `mcp__gaf__review_add` 로 규칙을 청한다(사람이 승인해야 들어간다 — 볼 캡처를 만드는 명령은 `mcp__gaf__check_add` 의 기본 검사로 따로 청한다).
+- 규칙이 없는 한 번짜리 일에 검토가 필요하면 맡길 때 review 로 검토 역할을 같이 적는다 — 만든 역할이 후보를 낼 때마다 지휘자가 처음 보는 검토 세션들에게 보이고, 막힘이 없고 지금까지 가장 나은 것보다 낫다고 모두 고를 때만 채택한다.
   채택되지 않으면 까닭을 만든 역할에게 돌려보낸다(연속 네 번 채택되지 않으면 멈춘다). 후보로 볼 그림 · 파일은 review_files 로, 무엇을 볼지는 review_brief 로 준다. 하나가 채택돼도 더 나은 것을 계속 찾게 하려면 review_keep_going 을 true 로 준다.
-  검토 역할은 `mcp__gaf__new_role` 로 미리 만들어 둔다. 회차마다 검토 세션을 새로 여니 사용량이 많이 든다 — 꼭 필요한 일에만 쓴다.
+  검토 역할은 `mcp__gaf__new_role` 로 미리 만들어 둔다. 회차마다 검토 세션을 새로 여니 사용량이 많이 든다.
 - 검사 횟수는 check_rounds(기본 3), 한도는 check_timeout_min(기본 10분), 셸은 check_shell(bash 또는 powershell)로 준다.
 - 통과 · 실패가 종료 코드로 나오는 검사(시험 · 빌드 · 검증 스크립트)가 있으면 맡길 때 check 로 같이 준다 — 역할이 끝냈다고 하면 지휘자가 돌려 보고, 실패하면 출력의 끝을 역할에게 돌려보내 고치게 한다(기본 3번까지). 네가 결과를 받아 직접 돌려 보고 다시 맡기지 않아도 된다. 검사 명령은 무엇도 고치지 않는 것이어야 한다.
 - 사람에게 보여 줄 그림 · 영상(검수 요청 등)은 답 글에 경로만 적지 말고 `mcp__gaf__show` 로 올린다 — 사람은 화면에서 바로 본다.
@@ -445,7 +492,7 @@ def build(conductor, sender: str | None) -> list[ToolDef]:
         result = await conductor.assign(args.get("role"), args.get("title"), args.get("brief"),
                                         done_when=str(args.get("done_when") or ""), sender=sender,
                                         **{key: args[key] for key in ("check", "check_rounds", "check_timeout_min", "check_shell",
-                                           "review", "review_files", "review_brief", "review_keep_going", "expect")
+                                           "review", "review_files", "review_brief", "review_keep_going", "expect", "default_review")
                                            if key in args})
         if not result.get("ok"):
             return _fail(result)
@@ -640,6 +687,18 @@ def build(conductor, sender: str | None) -> list[ToolDef]:
         result = await conductor.request_check("check_remove", args, sender=sender)
         return (result.get("text") or f"{result['id']} 기본 검사 제거 승인 청") if result.get("ok") else _fail(result)
 
+    async def review_list(args):
+        result = conductor.review_list(sender=sender)
+        return reviews_text(result["reviews"], result["trusted"], for_lead=sender is not None) if result.get("ok") else _fail(result)
+
+    async def review_add(args):
+        result = await conductor.request_review("review_add", args, sender=sender)
+        return (result.get("text") or f"{result['id']} 기본 검토 추가 승인 청 — 규칙 전문은 화면에서 본다") if result.get("ok") else _fail(result)
+
+    async def review_remove(args):
+        result = await conductor.request_review("review_remove", args, sender=sender)
+        return (result.get("text") or f"{result['id']} 기본 검토 제거 승인 청") if result.get("ok") else _fail(result)
+
     role_name = _text("역할 이름(team 도구에 나온 그대로)")
     return [
         ToolDef("custom", "기본 글에 더할 Custom 변경을 사람에게 청한다. 승인 뒤 지휘자가 쓴다.",
@@ -656,6 +715,25 @@ def build(conductor, sender: str | None) -> list[ToolDef]:
                          "why": _text("어떤 실수를 막나")}, ["name", "command", "why"]), _safe(check_add)),
         ToolDef("check_remove", "기본 검사 제거를 사람에게 청한다.",
                 _schema({"name": _text("검사 이름")}, ["name"]), _safe(check_remove)),
+        ToolDef("review_list", "프로젝트 기본 검토 규칙과 믿음을 본다.", _schema({}, []), _safe(review_list)),
+        ToolDef("review_add", "기본 검토 규칙 추가를 사람에게 청한다(맞는 파일이 바뀌면 지휘자가 늘 검토한다). 사람이 승인해야 들어간다.",
+                _schema({"name": _text("규칙 이름(1~40자)"),
+                         "when": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20,
+                                  "description": "이 글롭에 맞는 파일이 바뀌면 검토한다"},
+                         "reviewers": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3,
+                                       "description": "검토 역할(작은 바뀜은 첫 역할 하나만 본다)"},
+                         "files": {"type": "array", "items": {"type": "string"}, "maxItems": 12,
+                                   "description": "검토가 볼 그림 · 레퍼런스 글롭"},
+                         "brief": {"type": "string", "maxLength": 4000, "description": "검토 기준"},
+                         "small": {"type": "object", "properties": {
+                             "area": {"type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "바뀐 넓이 % 가 이보다 작으면 작음"},
+                             "lines": {"type": "integer", "minimum": 1, "description": "바뀐 줄 수가 이보다 작으면 작음"},
+                             "chars": {"type": "integer", "minimum": 1, "description": "바뀐 글자 수가 이보다 작으면 작음"}},
+                             "additionalProperties": False},
+                         "keep_going": {"type": "boolean", "description": "큰 바뀜에서 나란히 견주기로 더 나은 것을 찾나(기본 true)"},
+                         "why": _text("왜 늘 검토해야 하나")}, ["name", "when", "reviewers", "why"]), _safe(review_add)),
+        ToolDef("review_remove", "기본 검토 규칙 제거를 사람에게 청한다.",
+                _schema({"name": _text("규칙 이름")}, ["name"]), _safe(review_remove)),
         ToolDef("team", "역할마다 상태 · 들고 있는 일 · 줄 길이 · 마지막 결과 한 줄 · 쓰기 범위를 본다. 켜 둔 외부 도구도 나온다.",
                 _schema({}, []), _safe(team)),
         ToolDef("assign", "역할에게 일을 맡긴다. 바로 일 번호를 돌려주고, 끝나면 결과 글이 따로 온다. "

@@ -807,7 +807,7 @@ class Server:
             return await c.assign(_text(data, "role"), _text(data, "title"), _text(data, "brief"),
                                   done_when=_text(data, "done_when"), sender=None,
                                   **{key: data[key] for key in ("check", "check_rounds", "check_timeout_min", "check_shell",
-                                     "review", "review_files", "review_brief", "review_keep_going", "expect")
+                                     "review", "review_files", "review_brief", "review_keep_going", "expect", "default_review")
                                      if key in data})
         if path == "/api/role":
             action, name = _text(data, "action"), _text(data, "name")

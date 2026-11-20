@@ -107,6 +107,7 @@ def _parser():
     assign.add_argument("--review-files", default=None, metavar="글롭,…")
     assign.add_argument("--review-brief", default=None, metavar="글")
     assign.add_argument("--review-keep-going", action="store_true")
+    assign.add_argument("--no-default-review", action="store_true", help="이 일에서 기본 검토를 뺀다(사람만 — 총괄은 못 뺀다)")
     tell = command("tell", "일을 새로 만들지 않고 역할의 줄에 글을 덧붙인다")
     tell.add_argument("role", metavar="역할")
     tell.add_argument("text", nargs="?", default=None, metavar="글", help="`-` 면 표준 입력에서 읽는다")
@@ -161,6 +162,22 @@ def _parser():
     add.add_argument("--why", required=True)
     remove = command("remove", "기본 검사 제거(총괄은 사람 승인)", actions)
     remove.add_argument("name")
+    reviews = command("review", "프로젝트 기본 검토(맞는 파일이 바뀌면 지휘자가 늘 검토)를 본다 · 추가하거나 뺀다")
+    review_actions = reviews.add_subparsers(dest="action", required=True)
+    command("list", "기본 검토 규칙과 믿음", review_actions)
+    review_add = command("add", "기본 검토 추가(총괄은 사람 승인)", review_actions)
+    review_add.add_argument("name")
+    review_add.add_argument("--when", required=True, metavar="글롭,…", help="이 글롭에 맞는 파일이 바뀌면 검토한다")
+    review_add.add_argument("--reviewers", required=True, metavar="역할,…", help="검토 역할 1~3개(작은 바뀜은 첫 역할 하나만 본다)")
+    review_add.add_argument("--files", default="", metavar="글롭,…", help="검토가 볼 그림 · 레퍼런스")
+    review_add.add_argument("--brief", default="", metavar="글", help="검토 기준")
+    review_add.add_argument("--small-area", type=float, default=None, metavar="%", help="바뀐 넓이가 이보다 작으면 가벼운 검토")
+    review_add.add_argument("--small-lines", type=int, default=None, metavar="N", help="바뀐 줄 수가 이보다 작으면 가벼운 검토")
+    review_add.add_argument("--small-chars", type=int, default=None, metavar="N", help="바뀐 글자 수가 이보다 작으면 가벼운 검토")
+    review_add.add_argument("--no-keep-going", action="store_true", help="큰 바뀜에서도 나란히 견주기로 더 찾지 않는다")
+    review_add.add_argument("--why", required=True)
+    review_remove = command("remove", "기본 검토 제거(총괄은 사람 승인)", review_actions)
+    review_remove.add_argument("name")
     listing = command("projects", "이 PC에서 연 프로젝트를 본다 · `projects forget <폴더>` 는 목록에서 뺀다")
     listing.add_argument("action", nargs="?", choices=["forget"], metavar="forget")
     listing.add_argument("folder", nargs="?", type=Path, metavar="폴더")
@@ -278,7 +295,7 @@ def _status(paths):
 def _hooks(paths, action):
     config = load_config(paths)
     commands = config.hooks
-    fingerprint = hooks.digest(commands, config.checks)
+    fingerprint = hooks.digest(commands, config.checks, config.reviews)
     count = sum(len(commands.get(key, [])) for key in ("before_work", "after_work"))
     if count:
         for key, title in (("before_work", "일 전"), ("after_work", "일 뒤")):
@@ -288,6 +305,9 @@ def _hooks(paths, action):
     for check in config.checks:
         print(f"기본 검사: {check['name']}\n{check['command']}\nwhen: {', '.join(check['when']) or '(어떤 파일이든)'}")
     count += len(config.checks)
+    for review in config.reviews:      # 기본 검토(명령은 없다 — 회차마다 검토 세션을 연다)
+        print(f"기본 검토: {review['name']}\nwhen: {', '.join(review['when'])} · 검토 역할: {', '.join(review['reviewers'])}")
+    count += len(config.reviews)
     if action == "trust":
         hooks.trust(paths.root, fingerprint)
         print(f"믿었다 — 명령 {count}개(이 PC · 이 프로젝트). 떠 있는 지휘자는 다음 점검 때 알아챈다" if count else "명령이 없다")
@@ -304,7 +324,7 @@ def _checks(paths, args):
     from . import scope
     from .lead_tools import checks_text
     config = load_config(paths)
-    fingerprint = hooks.digest(config.hooks, config.checks)
+    fingerprint = hooks.digest(config.hooks, config.checks, config.reviews)
     if args.action == "list":
         print(checks_text(config.checks, not fingerprint or hooks.trusted(paths.root) == fingerprint))
         return 0
@@ -321,6 +341,26 @@ def _checks(paths, args):
         check = {"name": args.name}
     _, trusted = change_check(paths, kind, check)
     print("기본 검사를 바꿨다." + (" 함께 믿었다." if trusted else " `gaf hooks trust` 로 전체를 확인하라."))
+    return 0
+
+
+def _reviews(paths, args):
+    from .config import validate_reviews, change_review, ConfigError
+    from .lead_tools import reviews_text
+    config = load_config(paths)
+    fingerprint = hooks.digest(config.hooks, config.checks, config.reviews)
+    if args.action == "list":
+        print(reviews_text(config.reviews, not fingerprint or hooks.trusted(paths.root) == fingerprint))
+        return 0
+    kind, values = _tool_request(args)
+    if args.action == "add":
+        rule = validate_reviews([{k: v for k, v in values.items() if k != "why"}])[0]
+        if not args.why.strip() or len(args.why) > 4000:
+            raise ConfigError("why: 왜 늘 검토해야 하는지 1~4000자로 적는다")
+    else:
+        rule = {"name": args.name}
+    _, trusted = change_review(paths, kind, rule)
+    print("기본 검토를 바꿨다." + (" 함께 믿었다." if trusted else " `gaf hooks trust` 로 전체를 확인하라."))
     return 0
 
 
@@ -515,6 +555,17 @@ def _tool_request(args):
         return "check_add", {"name": args.name, "command": args.check_command,
                              "when": [s.strip() for s in args.when.split(",") if s.strip()],
                              "shell": args.shell, "timeout_min": args.timeout_min, "why": args.why}
+    if command == "review":
+        if args.action == "list":
+            return "review_list", {}
+        if args.action == "remove":
+            return "review_remove", {"name": args.name}
+        split = lambda text: [s.strip() for s in (text or "").split(",") if s.strip()]      # noqa: E731
+        small = {key: value for key, value in (("area", args.small_area), ("lines", args.small_lines),
+                                               ("chars", args.small_chars)) if value is not None}
+        return "review_add", {"name": args.name, "when": split(args.when), "reviewers": split(args.reviewers),
+                              "files": split(args.files), "brief": args.brief, "small": small,
+                              "keep_going": not args.no_keep_going, "why": args.why}
     if command == "library":
         if args.action == "list":
             return "library_list", {"kind": args.kind, "engine": args.engine, "find": args.find}
@@ -552,7 +603,8 @@ def _tool_request(args):
                           **({"review": [s.strip() for s in args.review.split(",") if s.strip()],
                               "review_files": [s.strip() for s in (args.review_files or "").split(",") if s.strip()],
                               "review_brief": args.review_brief or "", "review_keep_going": args.review_keep_going}
-                             if args.review else {})}
+                             if args.review else {}),
+                          **({"default_review": False} if args.no_default_review else {})}
     if command == "tell":
         return "tell", {"role": args.role, "text": _body(args.text, args.file)}
     if command == "send":
@@ -1078,6 +1130,8 @@ def main(argv: list[str] | None = None) -> int:
             return _hooks(paths, args.action)
         if args.command == "check":
             return _checks(paths, args)
+        if args.command == "review":
+            return _reviews(paths, args)
         if args.command == "projects":
             return _projects(args)
         if args.command == "remote":

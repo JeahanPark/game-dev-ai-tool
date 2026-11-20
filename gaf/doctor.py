@@ -222,10 +222,10 @@ def _hooks(paths: Paths) -> Check:
         commands = config.hooks
     except ConfigError:
         return Check(name, "skip", "설정 오류로 보지 못했다")
-    fingerprint = hooks.digest(commands, config.checks)
+    fingerprint = hooks.digest(commands, config.checks, config.reviews)
     if not fingerprint:
         return Check(name, "skip", "없다")
-    count = sum(len(commands.get(key, [])) for key in ("before_work", "after_work")) + len(config.checks)
+    count = sum(len(commands.get(key, [])) for key in ("before_work", "after_work")) + len(config.checks) + len(config.reviews)
     if hooks.trusted(paths.root) == fingerprint:
         return Check(name, "ok", f"{count}개 · 믿음")
     return Check(name, "fail", f"{count}개 · 아직 믿지 않았다", f"python -m gaf hooks trust --root {paths.root}")

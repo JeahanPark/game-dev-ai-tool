@@ -12,10 +12,14 @@ from . import paths
 COMMAND_TIMEOUT = 60               # 명령 하나가 끝나기를 기다리는 시간(초)이다.
 
 
-def digest(hooks: dict, checks=()) -> str:
+def digest(hooks: dict, checks=(), reviews=()) -> str:
+    # 기본 검토는 명령을 돌리지 않지만 회차마다 세션을 연다(사용량) — 남이 준 gaf.json 이 말없이 돌리지 않게 같이 믿는다.
+    # 규칙이 없으면 칸을 넣지 않는다: 예전 지문(일 앞뒤 명령 · 기본 검사)이 그대로 맞는다.
     commands = {key: hooks.get(key, []) for key in ("before_work", "after_work")}
     if checks:
         commands["checks"] = checks
+    if reviews:
+        commands["reviews"] = reviews
     if not any(commands.values()):
         return ""
     text = json.dumps(commands, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

@@ -38,6 +38,8 @@ DEFAULTS = {
     "codex": {"bin": "", "model": ""},
     "hooks": {"before_work": [], "after_work": []},
     "checks": [],
+    # 기본 검토(11-20 사용자 「음 이해했어 그럼 적용해」): 맞는 파일이 바뀌면 지휘자가 늘 돌리는 검토 — 총괄(AI)이 붙일지 정하지 않는다.
+    "reviews": [],
     "server": {"port": 0},
     "tools": [],
 }
@@ -62,6 +64,73 @@ class Config:
     codex: dict = field(default_factory=dict)
     hooks: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
+    reviews: list = field(default_factory=list)
+
+
+def _line_name(value) -> bool:
+    return (isinstance(value, str) and bool(value.strip()) and 1 <= len(value) <= 40
+            and not any(ord(c) < 32 or ord(c) == 127 for c in value))
+
+
+REVIEW_KEYS = ("name", "when", "reviewers", "files", "brief", "small", "keep_going")
+REVIEW_SMALL = ("area", "lines", "chars")
+REVIEW_FILES_MAX = 12
+
+
+def validate_reviews(value) -> list[dict]:
+    """기본 검토 규칙을 확인하고 빠진 칸을 기본값으로 채운다. 역할이 있는지는 지휘자가 돌릴 때 본다(설정은 역할을 모른다)."""
+    if not isinstance(value, list) or len(value) > 8:
+        raise ConfigError("reviews: 기본 검토는 8개 이하의 목록이어야 한다")
+    result, names = [], set()
+    for index, item in enumerate(value):
+        key = f"reviews[{index}]"
+        if not isinstance(item, dict):
+            raise ConfigError(f"{key}: 객체여야 한다")
+        for name in item:
+            if name not in REVIEW_KEYS:
+                raise ConfigError(f"{key}.{name}: 모르는 칸이다({' · '.join(REVIEW_KEYS)})")
+        name = item.get("name")
+        if not _line_name(name):
+            raise ConfigError(f"{key}.name: 줄바꿈 없는 1~40자의 이름이어야 한다")
+        if name in names:
+            raise ConfigError(f"{key}.name: 프로젝트 안에서 이름이 겹친다")
+        when = item.get("when")
+        if (not isinstance(when, list) or not 1 <= len(when) <= 20
+                or not all(isinstance(p, str) and p.strip() for p in when)):
+            raise ConfigError(f"{key}.when: 바뀐 파일을 가릴 글롭 1~20개의 목록이어야 한다")
+        reviewers = item.get("reviewers")
+        if (not isinstance(reviewers, list) or not 1 <= len(reviewers) <= 3
+                or not all(_line_name(r) for r in reviewers) or len(set(reviewers)) != len(reviewers)):
+            raise ConfigError(f"{key}.reviewers: 겹치지 않는 검토 역할 이름 1~3개의 목록이어야 한다")
+        files = item.get("files", [])
+        if not isinstance(files, list) or len(files) > REVIEW_FILES_MAX:
+            raise ConfigError(f"{key}.files: 검토가 볼 경로 · 글롭 {REVIEW_FILES_MAX}개 이하의 목록이어야 한다")
+        for pattern in files:
+            path = pattern.replace("\\", "/") if isinstance(pattern, str) else ""
+            if (not path.strip() or path.startswith(("/", "~")) or ":" in path or ".." in path.split("/")
+                    or any(ord(c) < 32 for c in path)):
+                raise ConfigError(f"{key}.files: 프로젝트 뿌리 아래의 상대 경로 · 글롭이어야 한다: {pattern!r}")
+        brief = item.get("brief", "")
+        if not isinstance(brief, str) or len(brief) > 4000:
+            raise ConfigError(f"{key}.brief: 4000자 이내의 글이어야 한다")
+        small = item.get("small", {})
+        if not isinstance(small, dict):
+            raise ConfigError(f"{key}.small: 작음의 기준(area · lines · chars)을 적은 객체여야 한다")
+        for part, number in small.items():
+            if part not in REVIEW_SMALL:
+                raise ConfigError(f"{key}.small.{part}: 모르는 칸이다(area · lines · chars)")
+            if part == "area":
+                if type(number) not in (int, float) or not math.isfinite(number) or not 0 < number <= 100:
+                    raise ConfigError(f"{key}.small.area: 0보다 크고 100 이하의 수(바뀐 넓이 %)여야 한다")
+            elif type(number) is not int or number < 1:
+                raise ConfigError(f"{key}.small.{part}: 1 이상의 정수여야 한다")
+        keep_going = item.get("keep_going", True)
+        if type(keep_going) is not bool:
+            raise ConfigError(f"{key}.keep_going: true 또는 false 여야 한다")
+        names.add(name)
+        result.append(dict(name=name, when=list(when), reviewers=list(reviewers), files=list(files), brief=brief,
+                           small={part: small[part] for part in REVIEW_SMALL if part in small}, keep_going=keep_going))
+    return result
 
 
 def validate_checks(value) -> list[dict]:
@@ -107,7 +176,9 @@ def _validate(value, sample, key: str) -> None:
             raise ConfigError(f"{key}: 목록이어야 한다")
         if key == "checks":
             validate_checks(value)
-        if key not in ("tools", "checks") and not all(isinstance(item, str) for item in value):
+        if key == "reviews":
+            validate_reviews(value)
+        if key not in ("tools", "checks", "reviews") and not all(isinstance(item, str) for item in value):
             raise ConfigError(f"{key}: 글 목록이어야 한다")
         if key in ("hooks.before_work", "hooks.after_work") and any(not item.strip() for item in value):
             raise ConfigError(f"{key}: 빈 명령이 있다")
@@ -162,7 +233,41 @@ def load_config(paths: Paths) -> Config:
             raise ConfigError(f"bash_deny[{index}]: 정규식이 잘못됐다: {exc}") from exc
     return Config(raw["project"], raw["lead"]["role"], raw["defaults"], raw["limits"],
                   raw["session"], raw["bash_deny"], raw["claude"], raw["server"], raw["tools"], raw,
-                  codex=raw["codex"], hooks=raw["hooks"], checks=validate_checks(raw["checks"]))
+                  codex=raw["codex"], hooks=raw["hooks"], checks=validate_checks(raw["checks"]),
+                  reviews=validate_reviews(raw["reviews"]))
+
+
+def change_review(paths: Paths, kind: str, rule: dict) -> tuple[Config, bool]:
+    """사람이 승인한 기본 검토 규칙만 반영한다(change_check 와 같은 잠금 · 믿음 규칙). reviews 밖의 키는 그대로 둔다."""
+    from . import hooks
+    from .paths import file_lock, _atomic_json
+    with file_lock(paths.state_dir / "gaf.json"):
+        try:
+            supplied = json.loads(paths.config.read_text(encoding="utf-8-sig")) if paths.config.exists() else {}
+        except (OSError, ValueError, RecursionError) as exc:
+            raise ConfigError("gaf.json: 설정 JSON을 읽을 수 없어 기본 검토를 바꾸지 않았다") from exc
+        _validate(supplied, DEFAULTS, "")
+        old_checks = validate_checks(supplied.get("checks", []))
+        old_reviews = validate_reviews(supplied.get("reviews", []))
+        old_hooks = supplied.get("hooks", {})
+        fingerprint = hooks.digest(old_hooks, old_checks, old_reviews)
+        was_trusted = not fingerprint or hooks.trusted(paths.root) == fingerprint
+        if kind == "review_add":
+            updated = validate_reviews([*old_reviews, rule])
+        elif kind == "review_remove":
+            current = next((row for row in old_reviews if row["name"] == rule.get("name")), None)
+            if current is None:
+                raise ConfigError("reviews.name: 없는 기본 검토다")
+            if len(rule) > 1 and validate_reviews([rule])[0] != current:
+                raise ConfigError("reviews: 청한 뒤 기본 검토 내용이 바뀌었다 — 다시 청한다")
+            updated = [row for row in old_reviews if row["name"] != current["name"]]
+        else:
+            raise ConfigError("모르는 기본 검토 명령이다")
+        supplied["reviews"] = updated
+        _atomic_json(paths.config, supplied)
+        if was_trusted:
+            hooks.trust(paths.root, hooks.digest(old_hooks, old_checks, updated))
+        return load_config(paths), was_trusted
 
 
 def change_check(paths: Paths, kind: str, check: dict) -> tuple[Config, bool]:
@@ -186,8 +291,9 @@ def change_check(paths: Paths, kind: str, check: dict) -> tuple[Config, bool]:
         _validate(supplied, DEFAULTS, "")
         # 위에서 읽은 바로 그 디스크 내용으로 믿음도 판단한다.
         old_checks = validate_checks(supplied.get("checks", []))
+        old_reviews = validate_reviews(supplied.get("reviews", []))
         old_hooks = supplied.get("hooks", {})
-        fingerprint = hooks.digest(old_hooks, old_checks)
+        fingerprint = hooks.digest(old_hooks, old_checks, old_reviews)
         was_trusted = not fingerprint or hooks.trusted(paths.root) == fingerprint
         if kind == "check_add":
             updated = validate_checks([*old_checks, check])
@@ -200,5 +306,5 @@ def change_check(paths: Paths, kind: str, check: dict) -> tuple[Config, bool]:
         supplied["checks"] = updated
         _atomic_json(paths.config, supplied)
         if was_trusted:
-            hooks.trust(paths.root, hooks.digest(old_hooks, updated))
+            hooks.trust(paths.root, hooks.digest(old_hooks, updated, old_reviews))
         return load_config(paths), was_trusted

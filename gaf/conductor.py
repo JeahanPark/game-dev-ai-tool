@@ -28,11 +28,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import commits, hooks
+from . import commits, default_review, hooks
 from . import limits as limits_mod
 from . import roles as roles_mod
 from . import scope
-from .config import Config, ConfigError, JOB_COMMAND_MAX, load_config, validate_checks, change_check
+from .config import (Config, ConfigError, JOB_COMMAND_MAX, load_config, validate_checks, change_check,
+                     validate_reviews, change_review)
 from .engines import base as engine_base
 from .engines.base import EFFORTS, Engine, EngineEvent, EngineSession, NotRunning, SessionSpec, ToolDef
 from .envclean import SESSION_ENV
@@ -164,7 +165,8 @@ def _tool_text(name: str, target: str) -> str:
              "new_role": "역할 만들기", "role_off": "역할 켜고 끄기", "reset_role": "역할 새로 시작",
              "library_list": "서랍 찾기", "library_show": "서랍 읽기", "library_take": "서랍에서 꺼내기",
              "job_run": "배경 명령", "jobs": "배경 일 보기", "job_out": "배경 일 출력", "job_stop": "배경 일 멈추기",
-             "check_list": "검사 목록", "check_add": "검사 추가 청하기", "check_remove": "검사 제거 청하기"}
+             "check_list": "검사 목록", "check_add": "검사 추가 청하기", "check_remove": "검사 제거 청하기",
+             "review_list": "기본 검토 목록", "review_add": "기본 검토 추가 청하기", "review_remove": "기본 검토 제거 청하기"}
     for names, word in (("read glob grep ls notebookread webfetch websearch toolsearch", "읽기"),
                         ("write edit multiedit notebookedit apply_patch patch delete", "고침"),
                         ("bash powershell shell exec exec_command local_shell command", "명령")):
@@ -250,6 +252,33 @@ def git_status(root: Path) -> dict[str, str] | None:
             index += 1
         found[path] = code
     return found
+
+
+def _action_word(kind: str) -> str:
+    return ("Custom 변경" if kind == "custom" else "기본 검사" if kind.startswith("check_") else
+            "기본 검토" if kind.startswith("review_") else "커밋" if kind == "commit" else "푸시")
+
+
+class GitState(dict):
+    """git 상태({경로: 두 글자})에 고친 채 남은 파일마다 (바뀐 시각 · 크기)를 곁들인다. 커밋 전에 이미 고친 파일을 스크립트가
+    또 고치면 두 글자가 그대로라 「바뀐 파일」에서 빠졌다(11-20 기본 검토를 만들며 고침 — 기본 검사도 같이 쓴다)."""
+
+    stats: dict
+
+
+def git_state(root: Path) -> GitState | None:
+    status = git_status(root)
+    if status is None:
+        return None
+    state = GitState(status)
+    state.stats = {}
+    for path in status:
+        try:
+            info = (Path(root) / path).stat()
+        except OSError:
+            continue
+        state.stats[path] = (info.st_mtime_ns, info.st_size)
+    return state
 
 
 @dataclass
@@ -440,7 +469,7 @@ class Conductor:
         self._started_at = self.clock()
         self._config_signature = _file_sig(self.paths.config)
         self._hooks = {key: list(self.config.hooks.get(key, [])) for key in ("before_work", "after_work")}
-        self._hooks_digest = hooks.digest(self._hooks, self.config.checks)
+        self._hooks_digest = hooks.digest(self._hooks, self.config.checks, self.config.reviews)
         self._refresh_hooks_trust()
         previous = self.store.read_state() or {}
         counters = previous.get("counters") if isinstance(previous.get("counters"), dict) else {}
@@ -898,8 +927,16 @@ class Conductor:
 
     async def assign(self, role, title, brief, *, done_when: str = "", check="", check_rounds=3,
                      check_timeout_min=10, check_shell="", review=None, review_files=None, review_brief="",
-                     review_keep_going=False, expect=None, sender: str | None = None) -> dict:
-        """일을 만들어 역할의 줄에 넣는다. sender 가 None 이면 사람이 직접 맡긴 것이다."""
+                     review_keep_going=False, expect=None, default_review=True, sender: str | None = None) -> dict:
+        """일을 만들어 역할의 줄에 넣는다. sender 가 None 이면 사람이 직접 맡긴 것이다.
+
+        default_review=False 는 이 일에서 기본 검토(`gaf.json` 의 reviews)를 뺀다 — 사람만 뺀다. 총괄(AI)이 검토를 붙일지
+        정하지 않게 한 것이 기본 검토다(사용자 11-20).
+        """
+        if type(default_review) is not bool:
+            return {"ok": False, "error": "default_review 는 true/false 로 준다"}
+        if default_review is False and sender is not None:
+            return {"ok": False, "error": "기본 검토는 사람만 뺀다 — 총괄은 뺄 수 없다(사람이 맡길 때 --no-default-review)"}
         name = str(role or "").strip()
         w = self._workers.get(name) if name in self.roles else None
         if w is None:
@@ -1036,6 +1073,8 @@ class Conductor:
         if review:
             record.update(review=review, review_files=review_files, review_brief=review_brief,
                           review_keep_going=review_keep_going, reviews=[], review_best=None, review_ok=None)
+        if default_review is False:
+            record["default_review"] = {"skipped": True}
         self.store.write_task(record)
         self._titles[task_id] = title
         self.store.emit("task.queued", role=name, task=task_id,
@@ -1677,7 +1716,7 @@ class Conductor:
         if sender is not None and sender != self.lead_name:
             return {"ok": False, "error": "기본 검사 명령은 총괄만 쓴다"}
         config = load_config(self.paths)
-        fingerprint = hooks.digest(config.hooks, config.checks)
+        fingerprint = hooks.digest(config.hooks, config.checks, config.reviews)
         return {"ok": True, "checks": config.checks,
                 "trusted": not fingerprint or hooks.trusted(self.paths.root) == fingerprint}
 
@@ -1728,6 +1767,59 @@ class Conductor:
         except (ConfigError, OSError) as exc:
             return {"ok": False, "error": str(exc)}
 
+    def review_list(self, *, sender=None):
+        if sender is not None and sender != self.lead_name:
+            return {"ok": False, "error": "기본 검토 명령은 총괄만 쓴다"}
+        config = load_config(self.paths)
+        fingerprint = hooks.digest(config.hooks, config.checks, config.reviews)
+        return {"ok": True, "reviews": config.reviews,
+                "trusted": not fingerprint or hooks.trusted(self.paths.root) == fingerprint}
+
+    async def request_review(self, kind, args, *, sender=None):
+        """기본 검토 규칙을 더하거나 뺀다 — 총괄은 사람에게 청하고(승인 카드), 사람은 바로 바꾼다(기본 검사와 같은 길)."""
+        if sender is not None and sender != self.lead_name:
+            return {"ok": False, "error": "기본 검토 명령은 총괄만 쓴다"}
+        lead = self._lead() if sender is not None else None
+        if lead is not None and lead.busy and lead.stop_requested and not self._closing:
+            return {"ok": False, "error": "멈춘 턴이다 — 청하지 않았다"}
+        try:
+            config = load_config(self.paths)
+            if kind == "review_add":
+                rule = validate_reviews([{key: args[key] for key in ("name", "when", "reviewers", "files", "brief",
+                                                                     "small", "keep_going") if key in args}])[0]
+                validate_reviews([*config.reviews, rule])
+                why = args.get("why")
+                if not isinstance(why, str) or not why.strip() or len(why) > 4000:
+                    raise ConfigError("why: 왜 늘 검토해야 하는지 1~4000자로 적는다")
+            elif kind == "review_remove":
+                rule = next((r for r in config.reviews if r["name"] == args.get("name")), None)
+                if rule is None:
+                    raise ConfigError("reviews.name: 없는 기본 검토다")
+                why = "기본 검토 제거"
+            else:
+                raise ConfigError("모르는 기본 검토 명령이다")
+            action = {"kind": kind, "review": rule, "why": why, "count": 1}
+            if sender is None:
+                return {"ok": True, "text": await self._apply_review(action)}
+            if self._closing or not self._started:
+                return {"ok": False, "error": "지휘자가 꺼지는 중이다"}
+            return self._request_action(sender, f"기본 검토 {'추가' if kind == 'review_add' else '제거'}: {rule['name']}", action)
+        except (ConfigError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+    async def _apply_review(self, action):
+        updated, trusted = await asyncio.to_thread(change_review, self.paths, action["kind"], action["review"])
+        self._hold_commands(updated)
+        self._config_signature = _file_sig(self.paths.config)
+        self._clear_notice("config:error")
+        self._refresh_hooks_trust()
+        for worker in self._workers.values():
+            worker.wake.set()
+        text = f"기본 검토 「{action['review']['name']}」를 {'더했다' if action['kind'] == 'review_add' else '뺐다'}."
+        return text + (" 함께 믿었다." if trusted else
+                       " 직전에 믿지 않은 상태였다 — 사람이 `python -m gaf hooks trust` 로 전체를 확인해야 돈다"
+                       "(세션에서는 못 치는 명령이다 — 사람에게 알린다).")
+
     async def _apply_check(self, action):
         updated, trusted = await asyncio.to_thread(change_check, self.paths, action["kind"], action["check"])
         self._hold_commands(updated)
@@ -1759,8 +1851,8 @@ class Conductor:
         if action["kind"] == "custom":
             same = next((item for item in waiting if all(item.get("action", {}).get(key) == action[key]
                          for key in ("kind", "scope", "role"))), None)
-        if action["kind"].startswith("check_"):
-            same = None  # 기본 검사 청은 합치지 않는다 — 청마다 카드 하나다.
+        if action["kind"].startswith(("check_", "review_")):
+            same = None  # 기본 검사 · 기본 검토 청은 합치지 않는다 — 청마다 카드 하나다.
         counted = {"files": len(action["files"])} if action["kind"] == "commit" else {"count": action["count"]}
         if same is not None and same["action"] == action:
             return {"ok": True, "id": same["id"], **counted, "again": True}      # 같은 내용을 다시 청했다 — 카드를 그대로 둔다
@@ -1807,7 +1899,7 @@ class Conductor:
         self._touch()
         self._flush_now()
         kind = decision["action"]["kind"]
-        word = "Custom 변경" if kind == "custom" else "기본 검사" if kind.startswith("check_") else "커밋" if kind == "commit" else "푸시"
+        word = _action_word(kind)
         head = f"[정할 것 {decision['id']}의 답] {word} 청 — "
         if answer != "승인":
             await self._action_say(head + ("거절됐다" if kind == "custom" else "거절") + (f": {answer}" if answer != "거절" else ""))
@@ -1821,7 +1913,7 @@ class Conductor:
     async def _run_action(self, decision, head):
         action = decision["action"]
         kind = action["kind"]
-        word = "Custom 변경" if kind == "custom" else "기본 검사" if kind.startswith("check_") else "커밋" if kind == "commit" else "푸시"
+        word = _action_word(kind)
         try:
             if kind == "custom":
                 result = self.save_custom(action["scope"], action["role"], action["text"])
@@ -1829,6 +1921,9 @@ class Conductor:
             elif kind.startswith("check_"):
                 text = await self._apply_check(action)
                 result = {"name": action["check"]["name"]}
+            elif kind.startswith("review_"):
+                text = await self._apply_review(action)
+                result = {"name": action["review"]["name"]}
             elif kind == "commit":
                 result = await asyncio.to_thread(commits.commit, self.paths.root, action["paths"], action["message"],
                                                  action["signature"], scratch=self.paths.state_dir)
@@ -1931,16 +2026,17 @@ class Conductor:
                 "since": str(item.get("since") or self._iso()), "questions": [shape], "future": None,
                 "first": shape["question"]}
         if discarded:
-            self._lead_memo.append("지휘자가 다시 떠서 승인을 기다리던 커밋 · 푸시 · 기본 검사 · Custom 청(" + ", ".join(discarded)
+            self._lead_memo.append("지휘자가 다시 떠서 승인을 기다리던 커밋 · 푸시 · 기본 검사 · 기본 검토 · Custom 청(" + ", ".join(discarded)
                                    + ")이 사라졌다 — 필요하면 다시 청한다.")
 
     @staticmethod
     def _action_view(action):
         if action["kind"] == "custom":
             return {key: action[key] for key in ("kind", "scope", "role", "text", "why")}
-        if action["kind"].startswith("check_"):
+        if action["kind"].startswith(("check_", "review_")):
             import copy
-            return copy.deepcopy({key: action[key] for key in ("kind", "check", "why")})
+            field = "check" if action["kind"].startswith("check_") else "review"
+            return copy.deepcopy({key: action[key] for key in ("kind", field, "why")})
         keys = ("kind", "files", "counts", "message") if action["kind"] == "commit" else (
             "kind", "branch", "upstream", "url", "commits", "count")
         return {key: action[key][:200] if key == "files" else action[key] for key in keys}
@@ -2006,7 +2102,11 @@ class Conductor:
                   **({"review_ok": r.get("review_ok"), "review_best": r.get("review_best"),
                       "reviews": len(r.get("reviews") or [])} if r.get("review") else {}),
                   **({"check_ok": r.get("check_ok"), "checks": max((c["n"] for c in r.get("checks", [])), default=0)}
-                     if r.get("check") or r.get("default_checks") else {})}
+                     if r.get("check") or r.get("default_checks") else {}),
+                  **({"default_review": {"level": r["default_review"].get("level"), "rules": r["default_review"].get("rules") or [],
+                                         "skipped": bool(r["default_review"].get("skipped")),
+                                         "error": bool(r["default_review"].get("error"))}}
+                     if r.get("default_review") else {})}
                  for r in self.store.list_tasks(role=role.name, limit=5)]
         return {"name": role.name, "lead": role.lead, "off": role.off, "engine": role.engine, "model": role.model,
                 "effort": role.effort, "write": list(role.write), "sandbox": self._sandbox_dirs(role), "role_text": read(role.role_path),
@@ -2402,8 +2502,9 @@ class Conductor:
         """
         self.config.hooks = {key: list(config.hooks.get(key, [])) for key in ("before_work", "after_work")}
         self.config.checks = list(config.checks)
+        self.config.reviews = list(config.reviews)          # 기본 검토도 사람의 믿음이 지킨다(같은 지문)
         self._hooks = {key: list(self.config.hooks[key]) for key in ("before_work", "after_work")}
-        self._hooks_digest = hooks.digest(self._hooks, self.config.checks)
+        self._hooks_digest = hooks.digest(self._hooks, self.config.checks, self.config.reviews)
 
     def _refresh_hooks_trust(self) -> None:
         """`gaf.json` 이 바뀌었으면 명령을 다시 읽고, 쥔 명령이 사람이 믿은 것인지 다시 본다.
@@ -2582,7 +2683,7 @@ class Conductor:
             return
         before = handoff = None
         if record is not None:
-            before = await asyncio.to_thread(git_status, self.paths.root)
+            before = await asyncio.to_thread(git_state, self.paths.root)
             if w.stop_requested or self._closing:
                 self._give_up(w, letter, record, "멈췄다")
                 return
@@ -2616,6 +2717,11 @@ class Conductor:
         if w.role.lead and outcome.got_result:
             del self._lead_memo[:w.memo_sent]    # 알림이 총괄에게 닿았다
         check_tail = ""
+        if (record is not None and self.config.reviews and "default_review" not in record
+                and outcome.got_result and outcome.ok and not outcome.error
+                and not is_blocked_answer(outcome.text) and not w.stop_requested and not self._closing):
+            # 기본 검토: 규칙에 맞는 파일이 바뀌었으면 총괄이 붙이지 않았어도 검토를 붙인다(사람이 뺀 일은 뺀다).
+            await self._attach_default_review(w, record, outcome, before)
         if (record is not None and record.get("review") and outcome.got_result and outcome.ok and not outcome.error
                 and not is_blocked_answer(outcome.text) and not w.stop_requested and not self._closing):
             outcome, check_tail = await self._review_loop(w, letter, record, outcome, before=before)
@@ -3498,16 +3604,24 @@ class Conductor:
             await asyncio.wait({task}, timeout=5)
 
     # ================================================================== 검사 고리
-    async def _selected_checks(self, w, record, out, before):
+    async def _changed_files(self, w, record, out, before) -> set[str]:
+        """이 일에서 바뀐 파일: 파일 도구로 쓴 경로 + 일 앞뒤 git 상태가 달라진 쓰기 범위 안의 경로(셸 · 스크립트 · 엔진이 쓴 것).
+        두 글자가 같아도 고친 채 남아 있던 파일의 시각 · 크기가 달라졌으면 바뀐 것이다. 같은 때 다른 역할이 쓴 것은 뺀다."""
         changed = set(out.wrote)
         if before is not None:
-            after = await asyncio.to_thread(git_status, self.paths.root)
+            after = await asyncio.to_thread(git_state, self.paths.root)
+            old_stats, new_stats = getattr(before, "stats", {}), getattr(after, "stats", {})
             for path, code in (after or {}).items():
-                if (before.get(path) != code and any(scope.glob_match(path, g) for g in self._scope_of(w))
+                moved = before.get(path) != code or (path in old_stats and new_stats.get(path) != old_stats[path])
+                if (moved and any(scope.glob_match(path, g) for g in self._scope_of(w))
                         and not any(scope.glob_match(path, g) for g in scope.ALWAYS_DENY)
                         and not self._made_by_other(w, path)):
                     changed.add(path.rstrip("/"))
         record["observed_wrote"] = sorted(set(record.get("observed_wrote", [])) | (changed - set(out.wrote)))
+        return changed
+
+    async def _selected_checks(self, w, record, out, before):
+        changed = await self._changed_files(w, record, out, before)
         selected = set(record.get("default_checks", []))
         for check in self.config.checks:
             if changed and (not check["when"] or any(scope.glob_match(p, g) for p in changed for g in check["when"])):
@@ -4162,6 +4276,99 @@ class Conductor:
         except OSError:
             pass
 
+    # ================================================================== 기본 검토(사용자 11-20)
+    def _reviewer_usable(self, reviewer: str, maker: str) -> bool:
+        r = self.roles.get(reviewer)
+        if r is None or r.off or r.lead or reviewer == maker:
+            return False
+        engine = self.engines.get(r.engine)
+        return bool(engine is not None and engine.available()[0])
+
+    async def _attach_default_review(self, w: _Worker, record: dict, out: _Outcome, before) -> None:
+        """규칙(`gaf.json` 의 reviews)에 맞는 파일이 바뀌었으면 이 일에 검토를 붙인다 — 총괄이 붙인 검토가 있으면 합친다.
+        총괄(AI)은 이 단계를 건너뛸 수 없다. 얼마나 무겁게 할지(가벼움 · 전체)는 첫 회차의 검사 · 사본 뒤에 잰다."""
+        changed = await self._changed_files(w, record, out, before)
+        rules = default_review.matched(self.config.reviews, changed)
+        if not rules:
+            return
+        usable, unusable, problems = [], [], []
+        for rule in rules:
+            names = [name for name in rule["reviewers"] if self._reviewer_usable(name, w.name)]
+            missing = [name for name in rule["reviewers"] if name not in names]
+            if missing:
+                problems.append(f"「{rule['name']}」의 검토 역할 {' · '.join(missing)}")
+            if names:
+                usable.append((rule, names))
+            else:
+                unusable.append(rule["name"])
+        explicit = bool(record.get("review"))
+        info = {"rules": [rule["name"] for rule, _ in usable], "specs": [rule for rule, _ in usable], "level": None,
+                "measures": {}, "explicit": explicit, "changed": sorted(changed)[:default_review.CHANGED_KEPT]}
+        if problems:
+            info["problems"] = problems
+            self._notice("default_review:roles", "warn",
+                         "기본 검토에 쓸 수 없는 검토 역할이 있다(없음 · 꺼짐 · 총괄 · 만든 역할 자신 · 엔진 없음): "
+                         + " / ".join(problems) + " — gaf.json 의 reviews 를 고치거나 그 역할을 켠다")
+        if not usable:
+            info["unusable"] = unusable
+            info["error"] = "검토 역할을 쓸 수 없다 — " + " / ".join(problems)
+            record["default_review"] = info
+            self.store.write_task(record)
+            return
+        reviewers = list(record.get("review") or [])
+        for _, names in usable:
+            for name in names:
+                if name not in reviewers and len(reviewers) < 3:
+                    reviewers.append(name)
+        files = list(record.get("review_files") or [])
+        for rule, _ in usable:
+            for pattern in rule["files"]:
+                if pattern not in files and len(files) < 12:
+                    files.append(pattern)
+        briefs = [record.get("review_brief") or ""] + [f"[기본 검토 「{rule['name']}」] {rule['brief']}"
+                                                         for rule, _ in usable if rule["brief"]]
+        keep = bool(record.get("review_keep_going")) or any(rule["keep_going"] for rule, _ in usable)
+        info.update(light=usable[0][1][0], full=list(reviewers), keep_going=keep)
+        record["default_review"] = info
+        record.update(review=reviewers, review_files=files, review_brief="\n".join(b for b in briefs if b)[:4000],
+                      review_keep_going=keep)
+        for key, value in (("reviews", []), ("review_best", None), ("review_ok", None)):
+            record.setdefault(key, value)
+        self._talk(w, "system", text="지휘자: 기본 검토 " + " · ".join(f"「{rule['name']}」" for rule, _ in usable)
+                   + "에 맞는 파일이 바뀌어 검토를 붙였다")
+        self.store.write_task(record)
+
+    def _decide_default_level(self, record: dict, row: dict) -> None:
+        """첫 회차의 사본(캡처가 돈 뒤)으로 바뀐 정도를 재 가벼움 · 전체를 정한다. 총괄이 붙인 검토가 같이 있으면 줄이지 않는다."""
+        info = record["default_review"]
+        snapshot = self.paths.state_dir / row["snapshot"] if row.get("snapshot") else None
+        for rule in info["specs"]:
+            lines, chars, text_why = default_review.text_measure(self.paths.root, rule, info["changed"])
+            if rule["files"]:
+                area, area_why = default_review.area_measure(self.paths.root, rule, snapshot, row.get("files") or [],
+                                                             default_review.baseline_dir(self.paths.state_dir, rule["name"]))
+            else:
+                area, area_why = None, "볼 그림을 적지 않은 규칙이다"
+            info["measures"][rule["name"]] = default_review.judge(rule, area, area_why, lines, chars, text_why)
+        light = not info["explicit"] and all(m["small"] for m in info["measures"].values())
+        info["level"] = "light" if light else "full"
+        if light:
+            record["review"], record["review_keep_going"] = [info["light"]], False
+
+    def _save_default_baseline(self, record: dict, best: dict) -> None:
+        """채택본의 그림을 규칙마다의 새 기준으로 둔다 — 다음 일은 이것과 견줘 바뀐 넓이를 잰다."""
+        info = record.get("default_review") or {}
+        if not info.get("rules") or not best.get("snapshot"):
+            return
+        folder = self.paths.state_dir / best["snapshot"]
+        for rule in info["specs"]:
+            if rule["files"]:
+                try:
+                    default_review.save_baseline(self.paths.state_dir, rule, folder, best.get("files") or [])
+                except OSError as exc:
+                    self._notice(f"default_review:baseline:{rule['name']}", "warn",
+                                 f"기본 검토 「{rule['name']}」의 기준 그림을 두지 못했다: {_brief(str(exc), 200)}")
+
     async def _review_loop(self, w: _Worker, letter: Letter, record: dict, out: _Outcome, *, before=None) -> tuple[_Outcome, str]:
         n, misses, errors, limit, best, tail = 1, 0, 0, REVIEW_MAX, None, ""
         last_snapshot = None
@@ -4211,6 +4418,14 @@ class Conductor:
                             row["errors"] += 1
                             errors += 1
                             row["why"], fatal = f"검토를 받지 못했다: {exc}", True
+                default = record.get("default_review") or {}
+                if default.get("rules") and default.get("level") is None and not w.stop_requested and not self._closing:
+                    # 기본 검토의 무게는 첫 회차에 한 번 정한다 — 캡처(기본 검사)가 돌고 사본이 뜬 뒤라 그림을 견줄 수 있다.
+                    await asyncio.to_thread(self._decide_default_level, record, row)
+                    from .lead_tools import default_review_line
+                    self._talk(w, "system", text="지휘자: 기본 검토 " + default_review_line(record).removeprefix("[기본 검토] "))
+                    self.store.emit("review.level", role=w.name, task=record["id"],
+                                    data={"level": default["level"], "reviewers": list(record["review"])})
                 if not row["why"] and not w.stop_requested and not self._closing:
                     w.wait_reason = f"{n}번째 후보 검토"
                     self._talk(w, "system", text=f"지휘자: {n}번째 후보를 검토에 맡겼다({' · '.join(record['review'])})")
@@ -4336,6 +4551,11 @@ class Conductor:
             record["review_ok"] = best is not None
             record["review_best"] = best["n"] if best else None
             record["review_restored"] = False
+            if best is not None and not (w.stop_requested or self._closing):
+                try:
+                    self._save_default_baseline(record, best)      # 채택본의 그림 몇 장 — 바로 베낀다(끝맺기 안이라 기다리지 않는다)
+                except Exception:  # noqa: BLE001 — 기준 그림을 못 둬도 검토 결과는 그대로다(다음 일이 「처음」으로 잰다).
+                    pass
             # 「작업 폴더 = 채택본」이 아닐 수 있는 때를 적는다. 맞는데도 「파일은 r<k> 이 아니다」라고 적으면 틀린 말이고
             # (11-16 총괄이 고침 — 가장 나은 것이 마지막 회차일 때의 멈춤), 아닌데도 말없이 「r<k> 채택」이라고 적으면 사람이 속는다
             # (11-16 최종 검수 — 아래 ② · ③).
@@ -4406,7 +4626,7 @@ class Conductor:
         if out.error:
             text = (text + "\n" if text else "") + f"(오류: {out.error})"
         text = text or "(답이 없다)"
-        from .lead_tools import adopted_check, best_unchecked, check_line, check_count, review_line
+        from .lead_tools import adopted_check, best_unchecked, check_line, check_count, review_line, default_review_line
 
         if adopted_check(record) and record.get("expect_ok") is not False and record.get("verify") != "could_not_run":
             record["verify"] = "passed"
@@ -4435,7 +4655,8 @@ class Conductor:
             tail = "\n".join(check_tail.splitlines()[-20:])[-1500:]
             text += (f"\n[지휘자가 돌린 검사] {check_count(record)}번 돌렸으나 통과하지 못했다"
                      f"(마지막: {why}) — 출력의 끝:\n{tail or '(출력이 없다)'}")
-        reviewed = review_line(record)
+        defaulted = default_review_line(record)
+        reviewed = "\n".join(line for line in (review_line(record), defaulted) if line)
         if record.get("review"):
             count = len(record["reviews"])
             if record["review_ok"]:
@@ -4455,6 +4676,8 @@ class Conductor:
                 if record["reviews"]:
                     for v in record["reviews"][-1]["verdicts"]:
                         text += f"\n— {v['role']}: {v['text'][:600]}"
+        if defaulted:
+            text += "\n" + defaulted
         record.update(status=status, finished_at=self._iso(), result=text, turns=out.turns,
                       cost_usd=round(out.cost_usd, 6), usage=dict(out.usage), outside=outside,
                       wrote=list(dict.fromkeys([*out.wrote, *record.get("observed_wrote", [])]))[:50],
