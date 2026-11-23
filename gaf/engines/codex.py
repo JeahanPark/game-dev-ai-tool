@@ -244,6 +244,23 @@ def limit_data(response: Any) -> dict | None:
             "windows": windows}
 
 
+def models_data(listed: Any) -> list[dict[str, Any]]:
+    """app-server 의 모델 목록 → [{id · name · note · efforts}] — 이 계정이 고를 수 있는 것(숨김은 뺀다)과 모델마다 되는 세기다.
+
+    세기 이름은 서버가 주는 그대로다(Luna 는 ultra 가 없다 — 11-24 사용자: 화면에서 모델 · 세기 바꾸기)."""
+    rows = getattr(listed, "data", None)
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        raw = row.model_dump(by_alias=True, mode="json") if hasattr(row, "model_dump") else row
+        if not isinstance(raw, dict) or raw.get("hidden") or not isinstance(raw.get("id"), str) or not raw["id"]:
+            continue
+        levels = [item["reasoningEffort"] for item in raw.get("supportedReasoningEfforts") or []
+                  if isinstance(item, dict) and isinstance(item.get("reasoningEffort"), str)]
+        out.append({"id": raw["id"], "name": str(raw.get("displayName") or raw["id"]),
+                    "note": str(raw.get("description") or ""), "efforts": levels})
+    return out
+
+
 def account_data(response: Any) -> dict[str, str | None]:
     """구독 이름 · 계정 종류만 남긴다. 이메일 · 계정 번호는 싣지 않는다."""
     account = response.get("account") if isinstance(response, dict) else None
@@ -730,9 +747,16 @@ class CodexEngine(Engine):
 
     def __init__(self, options: CodexEngineOptions | None = None) -> None:
         self.options = options or CodexEngineOptions()
+        self.models: list[dict[str, Any]] | None = None      # read_account 가 읽어 둔 모델 목록(아직 안 읽었으면 None)
 
     def session(self, spec: SessionSpec) -> CodexSession:
         return CodexSession(spec, self.options)
+
+    async def list_models(self, spec: SessionSpec) -> list[dict[str, Any]]:
+        """이 계정이 고를 수 있는 모델(세션 · 턴을 열지 않는다 — 사용량 없음). 못 읽으면 빈 목록."""
+        if self.models is None:
+            await self.read_account(spec)
+        return list(self.models or [])
 
     async def read_account(self, spec: SessionSpec) -> dict[str, Any] | None:
         """모델 · 세션 없이 app-server 에서 한도와 구독만 읽고 닫는다."""
@@ -751,6 +775,8 @@ class CodexEngine(Engine):
                 await client.__aenter__()
                 limit = await client._client.request("account/rateLimits/read", None, response_model=_Raw)
                 info = await client._client.request("account/read", {"refreshToken": False}, response_model=_Raw)
+                with contextlib.suppress(Exception):          # 같은 연결에서 모델 목록도 읽어 둔다 — 못 읽어도 계정 읽기는 간다
+                    self.models = models_data(await client.models()) or self.models
                 return {"limit": limit_data(limit), **account_data(info)}
 
             loop = asyncio.get_running_loop()

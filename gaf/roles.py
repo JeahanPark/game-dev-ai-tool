@@ -274,6 +274,36 @@ def create_role(paths: Paths, config: Config, name: str, *, duty="", engine=None
     return load_role(paths, config, name)
 
 
+def set_role_model(role: Role, model: str, effort: str) -> None:
+    """역할 글 머리말의 model · effort 만 고쳐 쓴다(다른 줄 · 본문 · 줄 끝은 그대로 · 없는 키는 머리말 끝에 더한다).
+
+    빈 글이면 값만 비운다 — 엔진이 제 기본을 쓴다(키를 지우면 gaf.json 의 기본값이 들어간다). 값의 검사는 부르는 쪽이 한다.
+    """
+    values = {"model": model, "effort": effort}
+    text = role.role_path.read_bytes().decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    end = _header_end(lines)
+    newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+    if end is None:
+        text = f"---{newline}" + "".join(f"{key}: {value}".rstrip() + newline for key, value in values.items()) + f"---{newline}" + text
+    else:
+        for key, value in values.items():
+            found = False
+            for index in range(1, end):
+                match = re.match(rf"^([ \t]*{key}[ \t]*:)", lines[index])
+                if match:
+                    ending = "\r\n" if lines[index].endswith("\r\n") else "\n" if lines[index].endswith("\n") else ""
+                    lines[index] = match[1] + (" " + value if value else "") + ending
+                    found = True
+            if not found:
+                lines.insert(end, f"{key}: {value}".rstrip() + newline)
+                end += 1
+        text = "".join(lines)
+    _atomic_text(role.role_path, text)
+    role.model, role.effort = model, effort
+    role.meta.update(values)
+
+
 def set_role_off(role: Role, off: bool) -> None:
     text = role.role_path.read_bytes().decode("utf-8")
     lines = text.splitlines(keepends=True)

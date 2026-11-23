@@ -59,7 +59,7 @@ ROUTES = {
     "/api/job": "GET", "/api/job/stop": "POST",
     "/api/library": "GET",
     "/": "GET", "/favicon.ico": "GET", "/api/state": "GET", "/api/stream": "GET",
-    "/api/chat": "GET", "/api/inbox": "GET", "/api/role": "GET POST", "/api/task": "GET", "/api/file": "GET",
+    "/api/chat": "GET", "/api/models": "GET", "/api/inbox": "GET", "/api/role": "GET POST", "/api/task": "GET", "/api/file": "GET",
     "/api/say": "POST", "/api/decide": "POST", "/api/stop": "POST", "/api/assign": "POST", "/api/custom": "POST",
     "/api/notices": "POST", "/api/shutdown": "POST", "/api/dictate": "POST",
     # 총괄 명령(`gaf team` · `gaf assign` …). 세션은 접근 값 대신 자기 표(X-GAF-Session)로 부른다.
@@ -763,6 +763,8 @@ class Server:
                 return {"items": library.items(query.get("kind", [None])[0])}
             except library.LibraryError as exc:
                 raise RequestError(400, str(exc)) from exc
+        if path == "/api/models":               # 그 역할의 엔진이 고를 수 있는 모델 · 모델마다 되는 세기(화면의 모델 바꾸기 창 — 11-24)
+            return await c.role_models(query.get("role", [""])[0])
         if path == "/api/chat":
             after = _number(query["after"][0], "after") if "after" in query else max(0, store.chat_count - 200)
             limit = _number(query.get("limit", ["200"])[0], "limit")
@@ -821,7 +823,9 @@ class Server:
                 return c.set_role_off(name, action == "off")
             if action == "reset":
                 return await c.reset_role(name)
-            raise RequestError(400, "action은 new · off · on · reset 중 하나다")
+            if action == "model":               # 사람이 화면에서 그 역할의 모델 · 세기를 바꾼다(빈 글 = 엔진 기본 — 11-24)
+                return c.set_role_model(name, _text(data, "model"), _text(data, "effort"))
+            raise RequestError(400, "action은 new · off · on · reset · model 중 하나다")
         if path == "/api/notices":
             if data.get("clear") is not True:
                 raise RequestError(400, "clear: true를 보낸다")

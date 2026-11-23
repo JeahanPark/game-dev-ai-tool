@@ -433,6 +433,7 @@ class Conductor:
         self._claude_account_task: asyncio.Task | None = None
         self._notices: list[dict[str, Any]] = []
         self._artifacts: list[dict[str, Any]] = []
+        self._models: dict[str, list[dict[str, Any]]] = {}      # 엔진 → 고를 수 있는 모델(엔진에 한 번 물어 기억한다)
         self._lead_memo: list[str] = []              # 총괄의 다음 턴 머리에 붙일 알림(턴을 따로 쓰지 않는다 · state.json 에도 남긴다)
         self._lost_actions: list[str] = []           # 다시 뜨며 버린 승인 대기 청(「d-0009 커밋」) — 사람이 알림을 지울 때까지 남긴다
         self._memo_loaded = False                    # 위 둘을 state.json 에서 이었나(이 지휘자를 처음 켤 때 한 번만 잇는다)
@@ -889,6 +890,57 @@ class Conductor:
             self._spawn(self.stop_role(name, by=by, hold=False))
         self._touch()
         return {"ok": True, "role": name, "off": bool(off)}
+
+    def set_role_model(self, name, model, effort) -> dict:
+        """사람이 화면에서 역할의 모델 · 세기를 바꾼다 — 역할 글 머리말에 적는다(빈 글 = 엔진이 제 기본을 쓴다).
+
+        도는 턴은 그대로 두고 다음 턴부터 쓴다. 모델이 바뀌면 다음 턴은 새 대화로 열린다(`_resume_decision` — 11-24 사용자).
+        """
+        name, model, effort = str(name or "").strip(), str(model or "").strip(), str(effort or "").strip()
+        w = self._workers.get(name)
+        if w is None:
+            return {"ok": False, "error": f"없는 역할이다: {name}"}
+        efforts = getattr(self.engines.get(w.role.engine), "efforts", EFFORTS)
+        if effort and effort not in efforts:
+            return {"ok": False, "error": f"모르는 세기다: {effort} ({' · '.join(efforts)})"}
+        if model and not _MODEL_NAME.fullmatch(model):
+            return {"ok": False, "error": f"모델 이름이 이상하다: {model}"}
+        # 엔진에서 읽은 목록에 있는 모델이면 그 모델이 되는 세기만 받는다(Luna 의 ultra · 세기가 없는 Haiku 4.5 — 조용히 내려가지 않게)
+        known = next((item for item in self._models.get(w.role.engine, []) if item["id"] == model), None)
+        if known is not None and effort and effort not in known["efforts"]:
+            return {"ok": False, "error": f"{known['name']} 은(는) 세기 {effort} 를 쓰지 못한다"
+                                          f"({' · '.join(known['efforts']) or '세기를 받지 않는 모델이다'})"}
+        try:
+            roles_mod.set_role_model(w.role, model, effort)
+        except (OSError, roles_mod.RoleError) as exc:
+            return {"ok": False, "error": str(exc)}
+        self.store.emit("role.changed", role=name, engine=w.role.engine, model=model, effort=effort, off=w.role.off)
+        self._touch()
+        return {"ok": True, "role": name, "model": model, "effort": effort}
+
+    async def role_models(self, name) -> dict:
+        """그 역할의 엔진이 고를 수 있는 모델과 모델마다 되는 세기 — 엔진에 한 번 물어 기억한다(글을 보내지 않는다).
+
+        못 읽으면 models 가 빈 목록이다 — 화면은 모델을 글로 적게 하고 세기는 엔진의 목록을 보인다.
+        """
+        name = str(name or "").strip()
+        w = self._workers.get(name)
+        if w is None:
+            return {"ok": False, "error": f"없는 역할이다: {name}"}
+        engine = self.engines.get(w.role.engine)
+        models = self._models.get(w.role.engine)
+        if models is None:
+            reader, models = getattr(engine, "list_models", None), []
+            if reader is not None:
+                try:
+                    models = list(await reader(SessionSpec(role=name, cwd=self.paths.root,
+                                                           env={**self.session_env, "GAF_ROLE": name})))
+                except Exception:  # noqa: BLE001 — 못 읽으면 글로 적게 한다
+                    models = []
+            if models:
+                self._models[w.role.engine] = models
+        return {"ok": True, "role": name, "engine": w.role.engine, "model": w.role.model, "effort": w.role.effort,
+                "efforts": list(getattr(engine, "efforts", EFFORTS)), "models": models}
 
     async def reset_role(self, name) -> dict:
         """「새로 시작」: 인계를 지난-인계로 옮기고 세션을 비운다."""

@@ -93,6 +93,23 @@ def account_data(info: Any) -> dict[str, Any]:
             for key, value in (("subscription", account.get("subscriptionType")), ("provider", account.get("apiProvider")))}
 
 
+def models_data(info: Any) -> list[dict[str, Any]]:
+    """SDK 초기 정보의 모델 목록 → [{id · name · note · efforts}] — 이 로그인이 고를 수 있는 것과 모델마다 되는 세기다.
+
+    `default`(계정의 기본 모델)는 빈 글로 준다 — 역할 글의 `model:` 을 비운 것과 같다(11-24 사용자: 화면에서 모델 · 세기 바꾸기).
+    """
+    rows = info.get("models") if isinstance(info, dict) else None
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not isinstance(row.get("value"), str) or not row["value"]:
+            continue
+        efforts = row.get("supportedEffortLevels") if row.get("supportsEffort") else []
+        out.append({"id": "" if row["value"] == "default" else row["value"],
+                    "name": str(row.get("displayName") or row["value"]), "note": str(row.get("description") or ""),
+                    "efforts": [level for level in efforts if isinstance(level, str)] if isinstance(efforts, list) else []})
+    return out
+
+
 @dataclass
 class _Unit:
     """turn() 하나가 모으는 것 — 내 글로 돈 턴들의 결과와 끼어든 턴의 결과."""
@@ -607,9 +624,16 @@ class ClaudeEngine(Engine):
 
     def __init__(self, options: ClaudeEngineOptions | None = None) -> None:
         self.options = options or ClaudeEngineOptions()
+        self.models: list[dict[str, Any]] | None = None      # read_account 가 읽어 둔 모델 목록(아직 안 읽었으면 None)
 
     def session(self, spec: SessionSpec) -> ClaudeSession:
         return ClaudeSession(spec, self.options)
+
+    async def list_models(self, spec: SessionSpec) -> list[dict[str, Any]]:
+        """이 로그인이 고를 수 있는 모델(글을 보내지 않는다 — 사용량 없음). 못 읽으면 빈 목록."""
+        if self.models is None:
+            await self.read_account(spec)
+        return list(self.models or [])
 
     async def read_account(self, spec: SessionSpec) -> dict[str, Any] | None:
         """글을 보내지 않고 SDK 초기 정보의 구독만 읽고 닫는다."""
@@ -625,7 +649,9 @@ class ClaudeEngine(Engine):
 
             async def read():
                 await client.connect()
-                return account_data(await client.get_server_info())
+                info = await client.get_server_info()
+                self.models = models_data(info) or self.models       # 같은 답에 모델 목록이 같이 온다 — 화면의 모델 고르기가 쓴다
+                return account_data(info)
 
             result = None
             try:

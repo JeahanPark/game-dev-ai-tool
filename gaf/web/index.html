@@ -104,7 +104,7 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .round{width:calc(34px*var(--u));height:calc(34px*var(--u));padding:0;border-radius:50%;display:inline-grid;place-items:center;flex:none}
 .send{background:var(--text);border-color:var(--text);color:#111}.send:hover:not(:disabled){background:#fff;border-color:#fff}
 .stop{background:var(--bad);border-color:var(--bad);color:#fff}.stop:hover:not(:disabled){background:#F2555A;border-color:#F2555A}
-#attachments{display:flex;flex-wrap:wrap;gap:8px}#attachments:empty{display:none}.attachment{display:flex;align-items:center;gap:4px}.attachment img{width:64px;height:56px;object-fit:contain;border-radius:6px}
+#attachments{display:flex;flex-wrap:wrap;gap:8px}#attachments:empty{display:none}.mini{min-height:44px;padding:0 10px;font-size:12px}.attachment{position:relative}.attachment button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;min-height:0;padding:0;border-radius:50%;font-size:14px;line-height:1}.attachment img{width:64px;height:56px;object-fit:contain;border-radius:6px}
 #message{padding:6px 4px 0}
 .panel{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0}
 .tabs{display:flex;gap:4px;flex:1;min-width:0;overflow:auto}.tabs button{border-color:transparent;background:none;color:var(--muted);white-space:nowrap;padding:6px 9px}.tabs button[aria-selected=true]{background:var(--pick);color:var(--text)}
@@ -190,7 +190,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div class="dock"><div class="column">
 <section id="decisions" hidden aria-label="내가 정할 것"><div id="decision-list"></div></section>
 <div id="live" class="live" hidden><span class="live-dots" aria-hidden="true"><i>•</i><i>•</i><i>•</i></span><span id="live-text"></span></div>
-<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></div></form>
+<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="model-edit" type="button" class="mini" hidden>바꾸기</button><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></div></form>
 <p id="message" class="message" role="status"></p>
 </div></div>
 </section>
@@ -208,7 +208,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
 <dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
 <dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div></div></dialog>
-<dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
+<dialog id="model-set" aria-labelledby="model-set-title"><div class="dialog-head"><h2 id="model-set-title">모델 · 세기</h2><button type="button" data-close="model-set">닫기</button></div><form id="model-set-form" class="dialog-body form"><label for="model-set-model">모델</label><select id="model-set-model"></select><input id="model-set-text" maxlength="80" autocomplete="off" aria-label="모델 이름" placeholder="모델 이름(비우면 엔진 기본)" hidden><p id="model-set-note" class="muted"></p><label for="model-set-effort">세기(effort)</label><select id="model-set-effort"></select><p class="muted">다음 답부터 쓴다. 모델을 바꾸면 그 역할은 새 대화로 시작한다.</p><p id="model-set-error" class="message" role="status"></p><button id="model-set-save" type="submit" class="primary">저장</button></form></dialog><dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
 <dialog id="image-view" aria-label="그림 크게 보기"><div class="dialog-head"><span>그림</span><button type="button" data-close="image-view">닫기</button></div><div class="dialog-body"><img id="large-image" alt="크게 보는 그림"></div></dialog>
 <dialog id="role-info" aria-labelledby="role-info-title"><div class="dialog-head"><h2 id="role-info-title">역할 정보</h2><button type="button" data-close="role-info">닫기</button></div><div class="dialog-body"><p id="role-info-error" class="message" role="status"></p><div id="role-info-body" class="role-info"></div></div></dialog>
 <dialog id="job-output" aria-labelledby="job-title"><div class="dialog-head"><h2 id="job-title">배경 일 출력</h2><button type="button" data-close="job-output">닫기</button></div><div class="dialog-body"><pre id="job-text"></pre><button id="job-reload" type="button">새로 읽기</button><p id="job-error" class="message" role="status"></p></div></dialog>
@@ -304,6 +304,34 @@ function player(kind, path) {
   if (kind === 'video') view.setAttribute('playsinline', '');
   view.src = fileURL(path); return view;
 }
+// ── 모델 · 세기 바꾸기(11-24 사용자) — 목록은 그 역할의 엔진에서 읽는다(모델마다 되는 세기가 다르다) ──
+let modelSet = null;
+function fillEfforts(keep) {
+  const picked = modelSet.models.find(m => m.id === $('model-set-model').value), list = picked ? picked.efforts : modelSet.efforts;
+  $('model-set-effort').replaceChildren(new Option('엔진 기본', ''), ...list.map(e => new Option(e, e)));
+  $('model-set-effort').value = list.includes(keep) ? keep : '';
+  $('model-set-note').textContent = picked ? picked.note : '';
+}
+$('model-edit').addEventListener('click', async () => {
+  const role = current(); if (!role) return;
+  try { modelSet = await api('/api/models?role=' + encodeURIComponent(role.name)); } catch (error) { message(error.message); return; }
+  const select = $('model-set-model'), listed = modelSet.models.length > 0;
+  select.hidden = !listed; $('model-set-text').hidden = listed; $('model-set-text').value = modelSet.model;
+  select.replaceChildren(...modelSet.models.map(m => new Option(m.id ? m.name + ' · ' + m.id : m.name, m.id)));
+  if (listed && !modelSet.models.some(m => m.id === modelSet.model)) select.append(new Option(modelSet.model, modelSet.model));
+  select.value = listed ? modelSet.model : ''; fillEfforts(modelSet.effort);
+  $('model-set-error').textContent = ''; $('model-set-title').textContent = role.name + ' — 모델 · 세기'; $('model-set').showModal();
+});
+$('model-set-model').addEventListener('change', () => fillEfforts($('model-set-effort').value));
+$('model-set-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const model = modelSet.models.length ? $('model-set-model').value : $('model-set-text').value.trim();
+  $('model-set-save').disabled = true;
+  try { await api('/api/role', {action:'model', name:modelSet.role, model, effort:$('model-set-effort').value}); $('model-set').close(); scheduleState(); }
+  catch (error) { $('model-set-error').textContent = error.message; }
+  $('model-set-save').disabled = false;
+});
+// ── /모델 · 세기 바꾸기 ──
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 $('custom-form').addEventListener('submit', event => { event.preventDefault(); saveCustom(); });
 $('custom-close').addEventListener('click', () => { if (!customSaving) $('custom-edit').close(); });
@@ -772,7 +800,7 @@ function updateComposer() {
   $('text').readOnly = sending || !!recording?.sid || !!converting?.sid; $('text').disabled = off; $('send').disabled = sending || off;
   $('image-add').hidden = !lead; $('image-add').disabled = sending; $('image-files').disabled = sending || !lead; $('attachments').hidden = !lead;
   $('attachments').querySelectorAll('button').forEach(b => { b.disabled = sending; });
-  $('model').textContent = role ? [role.engine, role.model].filter(Boolean).join(' · ') : '';
+  $('model').textContent = role ? [role.engine, role.model, role.effort].filter(Boolean).join(' · ') : ''; $('model-edit').hidden = !role;
   $('stop').hidden = !(role && (role.status === 'working' || role.status === 'waiting' || role.queue > 0)); $('stop').disabled = sending;
 }
 // ── 내가 정할 것(그 세션의 대화 아래 · 입력칸 위) ─────────────────────────────
@@ -798,6 +826,10 @@ function decisionCard(decision) {
     if (buttons.length) field.append(options);
     const input = node('input'); input.type = 'text'; input.id = 'answer-' + decision.id + '-' + index;
     const label = node('label', '직접 쓰기'); label.htmlFor = input.id;
+    // Enter = 답하기(11-24 사용자). 한글을 조합하는 중의 Enter 는 글자를 끝내는 것이라 보내지 않는다.
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.isComposing && !event.shiftKey) { event.preventDefault(); return answer.click(); }
+    });
     field.append(label, input); card.append(field); fields.push({question, chosen, input});
   });
   const errorLine = node('p', '', 'message'); errorLine.setAttribute('role','status');
@@ -1655,7 +1687,7 @@ function showAttachments() {
   $('attachments').replaceChildren();
   attachments.forEach(item => {
     const wrap = node('div', null, 'attachment'), img = node('img'); img.src = item.url; img.alt = item.file.name;
-    const remove = button('빼기', () => { URL.revokeObjectURL(item.url); attachments = attachments.filter(a => a !== item); showAttachments(); });
+    const remove = button('×', () => { URL.revokeObjectURL(item.url); attachments = attachments.filter(a => a !== item); showAttachments(); });
     remove.setAttribute('aria-label', item.file.name + ' 빼기'); wrap.append(img, remove); $('attachments').append(wrap);
   }); updateComposer();
 }
