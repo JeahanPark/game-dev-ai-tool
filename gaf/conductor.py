@@ -2542,6 +2542,9 @@ class Conductor:
                    # 폴더만으로는 파일 하나짜리 범위가 그 폴더째로 보인다 — 역할 글에 적힌 글롭 그대로도 준다(JSON 목록 · 11-16 다른 프로젝트 총괄의 청).
                    GAF_WRITE_GLOBS=json.dumps(list(w.role.write), ensure_ascii=False),
                    GAF_PID=str(os.getpid()), GAF_ROOT=str(self.paths.root), GAF_PROJECT=self.config.project)
+        # 검사 · 배경 일의 명령과 같은 기본값 — 없으면 파이썬으로 쓴 명령이 Windows 의 ANSI 코드페이지로 찍어, utf-8 로 읽는
+        # 실패 까닭의 한글이 깨진다(11-23 · 1.5.4). 사람이 정해 둔 값은 그대로 둔다.
+        env.setdefault("PYTHONIOENCODING", "utf-8")
         return env
 
     async def _finish_hooks(self, w: _Worker) -> None:

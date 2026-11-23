@@ -25,12 +25,26 @@ LOG = "serve.log"
 BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 
 
+def _python() -> str:
+    """지휘자를 띄울 파이썬. 창 없는 pythonw(바탕화면 아이콘)로 불렸어도 곁의 python 을 쓴다.
+
+    pythonw 로 뜬 지휘자에는 콘솔이 없다(아래의 창 없는 콘솔은 콘솔 프로그램만 받는다) — 그러면 세션의 엔진(claude.exe 등)이
+    뜰 때마다 Windows 가 빈 콘솔 창을 새로 띄운다(11-23 사용자 「아이콘을 켜서 … 갑자기 클로드 CMD 창이 켜졌어」 · 1.5.4).
+    """
+    called = Path(sys.executable)
+    if os.name == "nt" and called.name.lower().startswith("pythonw"):
+        console = called.with_name("python" + called.name[len("pythonw"):])
+        if console.is_file():
+            return str(console)
+    return sys.executable
+
+
 def spawn(root, *, popen=subprocess.Popen):
     """`python -m gaf serve --root <폴더>` 를 창 없이 띄운다 → 띄운 프로세스."""
     root = Path(root).resolve()
     state = Paths(root).state_dir
     state.mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-X", "utf8", "-m", "gaf", "serve", "--root", str(root)]
+    command = [_python(), "-X", "utf8", "-m", "gaf", "serve", "--root", str(root)]
     # 세션 안에서 띄워도 사람이 띄운 지휘자여야 한다 — 세션에 준 값은 물려주지 않는다.
     options = dict(cwd=str(Path(__file__).resolve().parent.parent), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                    env={key: value for key, value in os.environ.items() if key not in SESSION_ENV}, close_fds=True)
