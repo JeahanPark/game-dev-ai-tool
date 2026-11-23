@@ -75,6 +75,11 @@ WIKI_INSTRUCTIONS = """[위키 쓰는 법 — wiki/ · 지휘자가 붙인 글]
 """
 CUSTOM_MAX = 20000                      # 범위 하나에 사람이 저장하거나 총괄이 청할 수 있는 글자 수
 CUSTOM_LABELS = {"all": "전체 프로젝트", "project": "이 프로젝트", "role": "이 역할"}
+# 다시 뜨며 버린 승인 대기 청을 사람 · 총괄에게 알릴 때 붙이는 이름(11-23 사용자: 청이 말없이 사라졌다)
+ACTION_WORDS = {"commit": "커밋", "push": "푸시", "custom": "Custom", "check_add": "기본 검사 추가",
+                "check_remove": "기본 검사 제거", "review_add": "기본 검토 추가", "review_remove": "기본 검토 제거"}
+LOST_NOTICE = "lost-actions"
+KEPT_TEXTS = 20                         # state.json 에 남겨 다시 뜬 뒤에도 잇는 알림 글의 수(새것부터)
 ARTIFACT_KINDS = {".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image",
                   ".mp4": "video", ".webm": "video",
                   ".mp3": "audio", ".wav": "audio", ".ogg": "audio", ".md": "doc", ".csv": "doc"}
@@ -149,6 +154,12 @@ _BLOCKED = re.compile(r"^[\s#>*\-_`~]*막힘\s*[:：]")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9._\-\[\]:/]{1,80}")
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 _RANK = {"unknown": 0, "ok": 1, "hold": 2, "stop": 3}
+
+
+def _kept_texts(saved: Any, current: list[str]) -> list[str]:
+    """state.json 에 남긴 알림 글을 되살린다. 같은 프로세스에서 껐다 켜면 기억에도 같은 글이 있다 — 겹치지 않게 잇는다."""
+    kept = [text for text in saved if isinstance(text, str) and 0 < len(text) <= 4000] if isinstance(saved, list) else []
+    return (kept + [text for text in current if text not in kept])[-KEPT_TEXTS:]
 
 
 def _brief(text: Any, limit: int) -> str:
@@ -422,7 +433,9 @@ class Conductor:
         self._claude_account_task: asyncio.Task | None = None
         self._notices: list[dict[str, Any]] = []
         self._artifacts: list[dict[str, Any]] = []
-        self._lead_memo: list[str] = []              # 총괄의 다음 턴 머리에 붙일 알림(턴을 따로 쓰지 않는다)
+        self._lead_memo: list[str] = []              # 총괄의 다음 턴 머리에 붙일 알림(턴을 따로 쓰지 않는다 · state.json 에도 남긴다)
+        self._lost_actions: list[str] = []           # 다시 뜨며 버린 승인 대기 청(「d-0009 커밋」) — 사람이 알림을 지울 때까지 남긴다
+        self._memo_loaded = False                    # 위 둘을 state.json 에서 이었나(이 지휘자를 처음 켤 때 한 번만 잇는다)
         self._human_no = 0                           # 사람의 말(say · 사람의 send · assign · 정할 것의 답)을 센다 — 멈춤이 풀리는 때를 가린다
         self._held_gone: dict[str, tuple[int, str | None]] = {}      # 멈춘 채 폴더가 사라진 역할의 멈춤(이름 → 번호 · 멈춘 이)
         self._letter_chat: dict[str, int] = {}
@@ -479,6 +492,12 @@ class Conductor:
         self._job_n = number if type(number) is int and number >= 0 else 0
         if getattr(self.job_runner, "_closed", False):
             self.job_runner = JobRunner()
+        # 총괄이 돌기 전에 · 사람이 보기 전에 한 번 더 꺼졌다 켜져도 알림을 잃지 않는다(11-23: 기억에만 있어 잃었다).
+        # 같은 지휘자를 다시 켤 때는 기억이 더 새롭다 — 끌 때의 쓰기가 실패했으면 파일에는 이미 전한 · 지운 알림이 남아 있다.
+        if not self._memo_loaded:
+            self._lead_memo = _kept_texts(previous.get("lead_memo"), self._lead_memo)
+            self._lost_actions = _kept_texts(previous.get("lost_actions"), self._lost_actions)
+            self._memo_loaded = True
         self._restore_decisions(previous.get("decisions"))
         kept = previous.get("artifacts")
         self._artifacts = [item for item in kept if isinstance(item, dict)][:50] if isinstance(kept, list) else []
@@ -2009,7 +2028,8 @@ class Conductor:
             if "action" in item:
                 if found is not None:
                     self._decision_n = max(self._decision_n, int(found.group(1)))
-                    discarded.append(found.group())
+                    kind = item["action"].get("kind") if isinstance(item["action"], dict) else None
+                    discarded.append(f"{found.group()} {ACTION_WORDS.get(kind, '청') if isinstance(kind, str) else '청'}")
                 continue
             if item.get("detached") is not True:
                 continue
@@ -2026,8 +2046,14 @@ class Conductor:
                 "since": str(item.get("since") or self._iso()), "questions": [shape], "future": None,
                 "first": shape["question"]}
         if discarded:
-            self._lead_memo.append("지휘자가 다시 떠서 승인을 기다리던 커밋 · 푸시 · 기본 검사 · 기본 검토 · Custom 청(" + ", ".join(discarded)
-                                   + ")이 사라졌다 — 필요하면 다시 청한다.")
+            # 되살리지 않는다(사람이 본 때의 상태를 다시 확인할 수 없다) — 대신 총괄 · 사람 둘 다에게 알린다. 총괄이 스스로 다시
+            # 청하면 사람은 까닭을 모른 채 승인 카드를 다시 받는다(11-23 사용자 「야라고만 했는데 … 커밋할 곳을 찾는다고」).
+            self._lead_memo.append("지휘자가 다시 떠서 승인을 기다리던 청(" + ", ".join(discarded) + ")이 사라졌다 — 스스로 다시 청하지 않는다. "
+                                   "무엇이 사라졌는지 사람에게 알리고, 사람이 하라고 하면 다시 청한다.")
+            self._lost_actions = (self._lost_actions + discarded)[-KEPT_TEXTS:]
+        if self._lost_actions:
+            self._notice(LOST_NOTICE, "warn", "프로그램을 다시 켜면서 승인을 기다리던 청이 사라졌다: " + ", ".join(self._lost_actions)
+                         + ". 필요하면 총괄에게 다시 청하라고 한다.")
 
     @staticmethod
     def _action_view(action):
@@ -5236,9 +5262,12 @@ class Conductor:
 
     def clear_notices(self, prefix: str = "", *, remote: bool = False) -> None:
         """사람이 본 알림을 치운다(한도 알림은 한도가 풀릴 때 스스로 사라진다)."""
+        shown = any(item["key"] == LOST_NOTICE for item in self._notices)
         self._notices = [item for item in self._notices
                          if self._notice_hold(item["key"], remote)
                          or not item["key"].startswith(prefix)]
+        if shown and not any(item["key"] == LOST_NOTICE for item in self._notices):
+            self._lost_actions = []                  # 사람이 보고 지웠다 — 다음에 켤 때 다시 띄우지 않는다(밀려나 못 본 것은 남긴다)
         self._touch()
 
     def _role_status(self, w: _Worker) -> tuple[str, str]:
@@ -5338,6 +5367,9 @@ class Conductor:
         try:
             state = self.snapshot()
             state["jobs"] = self._job_views(full=True)       # 화면은 300자, 복구 기록은 명령 전문이다.
+            # 총괄 역할이 없으면 받는 이가 없다 — 남기지 않는다(나중에 만든 총괄의 첫 턴에 옛 알림이 붙지 않게).
+            state["lead_memo"] = self._lead_memo[-KEPT_TEXTS:] if self.config.lead_role in self.roles else []
+            state["lost_actions"] = list(self._lost_actions)
             self.store.set_state(state, patient=final or not self._state_fails)
         except OSError as exc:
             if not self._state_fails:

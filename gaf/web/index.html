@@ -819,8 +819,9 @@ function actionCard(decision) {
   const action = decision.action, commit = action.kind === 'commit', card = node('div', null, 'decision-card action-card');
   const check = action.kind === 'check_add' || action.kind === 'check_remove';
   const review = action.kind === 'review_add' || action.kind === 'review_remove';
-  card.append(node('strong', (action.kind === 'custom' ? 'Custom 청 · ' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청 · '
-    : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청 · ' : commit ? '커밋 청 · ' : '푸시 청 · ') + decision.from));
+  const head = action.kind === 'custom' ? 'Custom 청' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청'
+    : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청' : commit ? '커밋 청' : '푸시 청';
+  card.append(node('strong', head + ' · ' + decision.from));
   const list = node('div', null, 'action-list');
   if (action.kind === 'custom') {
     const text = action.text || '', preview = text.split('\n').slice(0, 8).join('\n').slice(0, 1200);
@@ -853,16 +854,31 @@ function actionCard(decision) {
     card.append(list);
   }
   const reason = node('input'); reason.type = 'text'; reason.id = 'reject-' + decision.id;
-  const label = node('label', '거절 까닭(선택)'); label.htmlFor = reason.id;
+  const label = node('label', '총괄에게 할 말(선택 — 물어보기 · 거절 까닭)'); label.htmlFor = reason.id;
   const errorLine = node('p', '', 'message'); errorLine.setAttribute('role', 'status');
+  const lock = on => { approve.disabled = reject.disabled = ask.disabled = reason.disabled = on; };
   const send = async value => {
-    approve.disabled = reject.disabled = true; reason.disabled = true;
+    lock(true);
     try { await api('/api/decide', {id:decision.id, answers:{[decision.questions[0].question]:value}}); scheduleState(); }
-    catch (error) { errorLine.textContent = error.message; approve.disabled = reject.disabled = reason.disabled = false; }
+    catch (error) { errorLine.textContent = error.message; lock(false); }
   };
-  const approve = button('승인', () => send('승인'), 'primary');
+  // 쓴 글이 있으면 승인하지 않는다 — 승인에는 글이 실리지 않아, 물으려고 쓴 말은 버려지고 커밋만 됐다(11-23 사용자).
+  const approve = button('승인', () => reason.value.trim()
+    ? void (errorLine.textContent = '쓴 글이 있다 — 승인에는 글이 실리지 않는다. 물으려면 「물어보기」, 거절하려면 「거절」을 누르고, 승인하려면 글을 지운다.')
+    : send('승인'), 'primary');
   const reject = button('거절', () => send(reason.value.trim() ? '거절: ' + reason.value.trim() : '거절'));
-  const actions = node('div', null, 'actions'); actions.append(approve, reject);
+  // 물어보기: 승인도 거절도 아닌 말 — 글만 총괄에게 가고 청은 그대로 남는다.
+  const ask = button('물어보기', async () => {
+    const text = reason.value.trim();
+    if (!text) { errorLine.textContent = '물어볼 글을 쓴다'; return; }
+    lock(true);
+    try {
+      await api('/api/say', {text:'[' + head + ' ' + decision.id + ' 에 대한 물음 — 승인도 거절도 아니다]\n' + text});
+      reason.value = ''; errorLine.textContent = '총괄에게 보냈다 — 청은 그대로 남아 있다.'; scheduleState();
+    } catch (error) { errorLine.textContent = error.message; }
+    lock(false);
+  });
+  const actions = node('div', null, 'actions'); actions.append(approve, reject, ask);
   card.append(label, reason, actions, errorLine); return card;
 }
 function updateDecisions() {
