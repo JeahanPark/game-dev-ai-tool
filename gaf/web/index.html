@@ -234,6 +234,27 @@ let key = new URLSearchParams(location.search).get('k');
 // 접근 값을 탭 안에만 두고 주소창 · 방문 기록에서는 지운다(저장이 막힌 브라우저에서는 주소에 그대로 둔다 — 새로 고침이 되게).
 try { if (key) { sessionStorage.setItem('gaf-key', key); history.replaceState(null, '', location.pathname); } else key = sessionStorage.getItem('gaf-key'); } catch (_) {}
 // 접근 값 없이 열렸으면(사설망을 거쳐 온 폰 · 다른 PC) 등록한 기기의 쿠키로 들어간다 — 맨 아래 begin 이 가린다.
+// ── 프로젝트의 표(원격 · 1.12.0) ── 공개 주소 하나로 이 PC 에 켜져 있는 프로젝트를 모두 연다: 주소 · 요청에 p=<표> 를 붙여 그 프로젝트에 머문다.
+// 표 없이 열면 공개 길을 켠 프로젝트가 답한다 — 첫 상태에서 그 표를 쥐고 주소에도 적는다(문을 쥔 지휘자가 바뀌어도 다른 프로젝트로 새지 않게).
+// 이 기기가 마지막에 쓰던 프로젝트는 적어 두었다가 표 없이 열 때 그리로 간다(begin). PC 화면은 프로젝트마다 주소가 따로라 쓰지 않는다.
+const door = {
+  id: key || ['127.0.0.1','localhost','[::1]'].includes(location.hostname) ? '' : (/^[0-9a-f]{12}$/.exec(new URLSearchParams(location.search).get('p') || '') || [''])[0],
+  gone: false, kept: '',
+  saved() { try { const last = localStorage.getItem('gaf-project') || ''; return /^[0-9a-f]{12}$/.test(last) ? last : ''; } catch (_) { return ''; } },
+  save(value) { try { if (value) localStorage.setItem('gaf-project', value); else localStorage.removeItem('gaf-project'); } catch (_) {} },
+  via(path) { return this.id && !(this.gone && path === '/api/projects') ? path + (path.includes('?') ? '&' : '?') + 'p=' + this.id : path; },
+  seen(path, status, result) {                                                               // → 그 답을 쓰면 안 되는 까닭(없으면 빈 글)
+    if (status === 409 && result.project_off) { this.gone = true; return ''; }               // 붙어 있던 프로젝트가 꺼졌다 — 목록은 표 없이 받는다
+    if (path !== '/api/state' || status !== 200) return '';
+    // 표를 쥔 뒤에 다른 프로젝트가 답했다(표가 다르거나 없다 — 옛 판의 지휘자가 앞문을 쥐었을 때): 그 상태를 그리지 않는다
+    if (this.kept && result.project_id !== this.kept) { this.gone = true; return '다른 프로젝트가 답했다 — 프로젝트 목록에서 다시 고른다'; }
+    this.gone = false;
+    if (result.remote?.via !== 'remote' || !result.project_id) return '';
+    if (result.project_id !== this.id) { this.id = result.project_id; history.replaceState(null, '', '/?p=' + this.id); }
+    if (this.kept !== this.id) { this.kept = this.id; this.save(this.id); }
+    return '';
+  }
+};
 const app = $('app'), phone = matchMedia('(max-width:899px)'), touch = matchMedia('(pointer:coarse)');
 let state = null, source = null, stateTimer = null, stateBusy = false, stateDirty = false, talkDirty = false, visibilityVersion = 0;
 let selected = null, followChat = true, olderBusy = false, sending = false, composing = false, attachments = [];
@@ -284,12 +305,14 @@ async function api(path, data) {
     timer = setTimeout(() => { timedOut = true; abort.abort(); }, 20000);
   }
   let response, result;
-  try { response = await fetch(path, options); result = await response.json(); }
+  try { response = await fetch(door.via(path), options); result = await response.json(); }
   catch (_) {
     if (timedOut) { reconnectLater(); throw new Error('20초 넘게 답이 없다 — 연결을 다시 잇는다'); }
     throw new Error('서버에 연결하지 못했다');
   }
   finally { if (timer !== null) clearTimeout(timer); }
+  const wrong = door.seen(path, response.status, result);
+  if (wrong) throw new Error(wrong);
   if (!response.ok || (result.ok === false && !(path === '/api/dictate' && data?.stream))) {
     const error = new Error(result.error || '요청을 마치지 못했다');
     if (Array.isArray(result.lines)) error.lines = result.lines;
@@ -306,7 +329,7 @@ async function act(path, data, errorTarget) {
   }
   catch (error) { show(error.message); return false; }
 }
-function fileURL(path) { return '/api/file?path=' + encodeURIComponent(path) + (key ? '&k=' + encodeURIComponent(key) : ''); }
+function fileURL(path) { return door.via('/api/file?path=' + encodeURIComponent(path) + (key ? '&k=' + encodeURIComponent(key) : '')); }
 function picture(path) {
   const b = button('', () => { $('large-image').src = fileURL(path); $('image-view').showModal(); }, 'preview');
   b.setAttribute('aria-label', '그림 크게 보기: ' + path);
@@ -1120,7 +1143,7 @@ async function showRemote() {
       if (remote.public && !remote.listening) rows.unshift(node('p', '공개 문이 닫혀 있다 — 이 PC의 포트를 열지 못했다', 'message'));
       if (remote.public && remote.listening) {
         const address = node('p', remote.address, 'message'), qr = node('div');
-        rows.unshift(node('p', '공개 길 — 인터넷에서 열린다'), address, qr);
+        rows.unshift(node('p', '공개 길 — 인터넷에서 열린다'), address, node('p', '이 PC 에 켜져 있는 프로젝트를 모두 이 주소 하나로 연다 — 폰의 프로젝트 목록에서 고른다', 'muted'), qr);
         if (data && qrAddress === remote.address) {
           const canvas = node('canvas'), scale = Math.max(1, Math.floor(200 / (data.size + 8)));
           canvas.width = canvas.height = (data.size + 8) * scale;
@@ -1155,7 +1178,7 @@ function publicSwitch(action) {
       showRemote.result = null; messages.replaceChildren();
       armed = true; toggle.textContent = action === 'on' ? '한 번 더 누르면 켠다' : '한 번 더 누르면 꺼진다';
       if (action === 'on') messages.replaceChildren(...[
-        '① 그 주소는 인터넷 어디서나 열린다 — 들어오는 것은 등록한 기기뿐이다',
+        '① 그 주소는 인터넷 어디서나 열린다 — 들어오는 것은 등록한 기기뿐이고, 등록한 기기는 이 PC 에 켜져 있는 프로젝트를 모두 연다',
         '② 이 PC 의 Tailscale 기기 이름이 공개 기록에 남고 지울 수 없다',
         '③ Tailscale 무료 요금제는 비상업용이다'
       ].map(text => node('p', text, 'message')));
@@ -1194,9 +1217,10 @@ async function showProjects(note) {
     projectBase = listed.base || ''; $('project-new-open').hidden = !listed.can_open || !$('project-new-form').hidden;
     for (const project of listed.projects) {
       const row = settingsRow(project.name, (projectWords[project.status] || project.status) + (project.decisions ? ' · 정할 것 ' + project.decisions : '') + (project.working ? ' · 일하는 역할 ' + project.working : ''));
-      // 떠 있는 다른 프로젝트: PC에서는 서버가 준 주소로, 원격에서는 지금 주소의 이름에 그 프로젝트의 원격 포트를 붙여 간다.
-      const address = project.url || (project.serve && project.running ? (project.https ? 'https:' : 'http:') + '//' + location.hostname + ':' + project.serve + '/' : '');
-      if (project.current) row.append(node('small', '지금 여기'));
+      // 떠 있는 다른 프로젝트: PC에서는 서버가 준 주소로, 공개 주소에서는 같은 주소에 그 프로젝트의 표를 붙여(?p=) 간다(1.12.0).
+      // 사설망 길은 전처럼 지금 주소의 이름에 그 프로젝트의 원격 포트를 붙여 간다.
+      const address = project.url || (project.id ? '/?p=' + project.id : project.serve && project.running ? (project.https ? 'https:' : 'http:') + '//' + location.hostname + ':' + project.serve + '/' : '');
+      if (project.current && !door.gone) row.append(node('small', '지금 여기'));
       else if (address) { const link = node('a', '열기'); link.href = address; row.append(link); }
       else if (listed.can_open && !project.running) {
         if (project.status === 'off') {
@@ -1215,6 +1239,7 @@ async function showProjects(note) {
         });
         row.append(drop);
       }
+      else if (!listed.can_open && project.status === 'off') row.append(node('small', 'PC 에서 켠다'));      // 폰 · 원격: 꺼진 것은 PC 에서만 켠다
       box.append(row);
     }
     if (note) $('projects-error').textContent = note;
@@ -1772,7 +1797,7 @@ async function connect() {
     await receiveState(); await receiveTalk(); talkDirty = false;
     if (programStopped || document.hidden || version !== visibilityVersion) return;
     talkEventSeq = talkEventSeq === null ? state.seq : Math.min(talkEventSeq, state.seq);
-    const stream = source = new EventSource('/api/stream?after=' + talkEventSeq + (key ? '&k=' + encodeURIComponent(key) : ''));
+    const stream = source = new EventSource(door.via('/api/stream?after=' + talkEventSeq + (key ? '&k=' + encodeURIComponent(key) : '')));
     // 이벤트가 올 때만 상태를 다시 받는다. 고른 세션의 이벤트면 대화도 이어 받는다.
     source.onmessage = event => {
       let got; try { got = JSON.parse(event.data); } catch (_) { return; }
@@ -2297,9 +2322,11 @@ $('pair').addEventListener('submit', async event => {
 async function begin() {
   if (!['127.0.0.1','localhost','[::1]'].includes(location.hostname)) $('no-key').textContent = 'PC의 「설정 → 원격 기기」에서 공개 길이 켜져 있는지 확인하고, 그 화면의 주소로 다시 연다';
   if (!key) {
+    if (!door.id && door.saved()) { location.replace('/?p=' + door.saved()); return; }              // 이 기기가 마지막에 쓰던 프로젝트로 간다
     let response;
-    try { response = await fetch('/api/state', {cache:'no-store'}); } catch (_) { $('no-key').hidden = false; return; }
+    try { response = await fetch(door.via('/api/state'), {cache:'no-store'}); } catch (_) { $('no-key').hidden = false; return; }
     if (response.status === 401) { $('pair').hidden = false; $('pair-code').focus(); return; }      // 등록하지 않은 기기
+    if (response.status === 409 && door.id) { door.save(''); location.replace('/'); return; }       // 그 프로젝트가 꺼져 있다 — 켜져 있는 것으로 연다
     if (!response.ok) { $('no-key').hidden = false; return; }                                       // PC에서 접근 값 없이 열었다
   }
   if (innerWidth < 1180) app.dataset.panel = 'off';          // 넓은 화면에서만 패널을 펴 둔 채 시작한다

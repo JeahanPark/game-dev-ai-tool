@@ -55,13 +55,20 @@ def _entry(raw) -> dict | None:
             "public": raw.get("public") is True and serve != 0, "public_port": public_port}
 
 
-def entries() -> list[dict]:
-    """적어 둔 프로젝트 — 최근에 연 것 먼저. 파일이 없거나 깨졌으면 빈 목록."""
+def read_entries() -> list[dict] | None:
+    """적어 둔 프로젝트 — 최근에 연 것 먼저. 파일을 읽지 못했으면(없다 · 잠겼다 · 깨졌다) None — 「비었다」와 가린다."""
     data = _read_json(_file())
-    items = data.get("projects") if data else None
+    if data is None:
+        return None
+    items = data.get("projects")
     if not isinstance(items, list):
         return []
     return [entry for entry in map(_entry, items) if entry is not None]
+
+
+def entries() -> list[dict]:
+    """적어 둔 프로젝트 — 최근에 연 것 먼저. 파일이 없거나 깨졌으면 빈 목록."""
+    return read_entries() or []
 
 
 def _write(rows: list[dict]) -> None:

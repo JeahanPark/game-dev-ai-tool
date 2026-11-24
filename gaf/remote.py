@@ -6,6 +6,9 @@
 
 설정과 기기 목록은 프로젝트 밖(접근 값 폴더)의 remote.json 에 둔다 — PC마다 하나고, git 에 올라가지 않으며,
 세션은 그 폴더를 읽지도 쓰지도 못한다(gaf/scope.py). 기기의 값은 해시만 적는다.
+
+등록 코드도 같은 파일에 둔다(1.12.0 — 해시 · 끝나는 시각 · 남은 횟수): 공개 길은 PC 하나의 문이라, 사람이 어느 프로젝트의 PC
+화면에서 「기기 등록」을 눌렀든 폰의 요청을 받는 지휘자(앞문을 쥔 지휘자 — gaf/doors.py)가 그 코드를 알아야 한다.
 """
 from __future__ import annotations
 
@@ -63,8 +66,14 @@ def _clean(data) -> dict:
                 and all(type(item.get(key)) in (int, float) for key in ("created", "seen"))):
             devices.append({"id": item["id"], "hash": item["hash"], "name": str(item.get("name") or "기기"),
                             "user": str(item.get("user") or ""), "created": item["created"], "seen": item["seen"]})
-    return {"v": 1, "hosts": [h for h in dict.fromkeys(hosts) if h], "users": list(dict.fromkeys(users)),
-            "identity_header": header if _HEADER.fullmatch(header) else IDENTITY_HEADER, "devices": devices}
+    cleaned = {"v": 1, "hosts": [h for h in dict.fromkeys(hosts) if h], "users": list(dict.fromkeys(users)),
+               "identity_header": header if _HEADER.fullmatch(header) else IDENTITY_HEADER, "devices": devices}
+    pairing = data.get("pairing")
+    if (isinstance(pairing, dict) and all(isinstance(pairing.get(key), str) and pairing.get(key) for key in ("salt", "hash"))
+            and type(pairing.get("until")) in (int, float) and type(pairing.get("tries")) is int and pairing["tries"] > 0):
+        # 살아 있는 등록 코드(있을 때만 적는다) — 코드 글자는 두지 않는다
+        cleaned["pairing"] = {key: pairing[key] for key in ("salt", "hash", "until", "tries")}
+    return cleaned
 
 
 def read_settings() -> dict:
@@ -101,8 +110,12 @@ def enable(hosts, *, users=(), identity_header: str = IDENTITY_HEADER) -> dict:
 
 
 def disable() -> None:
-    """끈다 — 들일 이름을 비운다. 기기 목록은 지우지 않는다(다시 켜면 등록한 기기가 그대로 붙는다)."""
-    update_settings(lambda data: data.update(hosts=[]))
+    """끈다 — 들일 이름을 비운다. 기기 목록은 지우지 않는다(다시 켜면 등록한 기기가 그대로 붙는다). 내 둔 등록 코드는 버린다."""
+    def off(data):
+        data["hosts"] = []
+        data.pop("pairing", None)
+
+    update_settings(off)
 
 
 def _iso(stamp: float) -> str:
@@ -128,7 +141,6 @@ class Remote:
         self.clock = clock
         self._stamp: object = ()              # 읽은 파일의 (고친 시각, 크기) — 달라지면 다시 읽는다
         self._data = _clean(None)
-        self._code: tuple[str, float, int] | None = None     # (숫자 여덟, 끝나는 시각, 남은 횟수) — 이 지휘자의 메모리에만
 
     def _load(self) -> dict:
         try:
@@ -187,51 +199,59 @@ class Remote:
         return value.strip()
 
     def start_pairing(self) -> dict | None:
-        """등록 코드를 새로 낸다(앞의 코드는 버린다) → 꺼져 있으면 None."""
+        """등록 코드를 새로 낸다(앞의 코드는 버린다) → 꺼져 있으면 None.
+
+        코드는 PC 하나의 것이다 — 이 PC 의 어느 지휘자가 받아도 통한다. 파일에는 해시 · 끝나는 시각 · 남은 횟수만 적는다."""
         if not self.enabled:
             return None
         digits = f"{secrets.randbelow(10 ** 8):08d}"
-        self._code = (digits, self.clock() + CODE_SECONDS, CODE_TRIES)
+        salt = secrets.token_hex(8)
+        pairing = {"salt": salt, "hash": _digest(salt + digits), "until": self.clock() + CODE_SECONDS, "tries": CODE_TRIES}
+        self._change(lambda data: data.update(pairing=pairing))
         return {"code": f"{digits[:4]}-{digits[4:]}", "seconds": CODE_SECONDS}
 
     def pair(self, code, *, name, user) -> tuple[str | None, str]:
-        """코드가 맞으면 기기를 등록하고 쿠키에 넣을 값을 준다 → (값, "") 또는 (None, 까닭)."""
+        """코드가 맞으면 기기를 등록하고 쿠키에 넣을 값을 준다 → (값, "") 또는 (None, 까닭).
+
+        파일을 잠그고 한 번에 한다(코드 보기 · 횟수 깎기 · 기기 적기) — 지휘자 여럿이 같이 받아도 횟수를 넘겨 찍어 보지 못한다."""
         if not self.enabled:
             return None, "원격 접속이 꺼져 있다"
-        if self._code is None:
+        if not self._load().get("pairing"):
+            # 낸 코드가 없다 — 파일을 잠그지도 쓰지도 않는다. 이 길은 등록하지 않은 기기(인터넷의 누구나)가 부른다: 요청마다
+            # 파일을 쓰면 쏟아붓는 것만으로 지휘자가 느려진다(11-24 검수). 쓰는 것은 코드가 살아 있는 동안의 틀린 시도(다섯 번까지) ·
+            # 맞은 시도 · 시간이 지난 코드를 버릴 때 한 번뿐이다.
             return None, "PC에서 먼저 기기 등록을 시작한다"
-        digits, until, tries = self._code
-        if self.clock() > until:
-            self._code = None
-            return None, "코드의 시간이 지났다 — PC에서 기기 등록을 다시 시작한다"
         # 전각 숫자(１２３…)도 같은 숫자로 본다 — 폰의 글자판에 따라 그렇게 들어올 수 있다.
         given = re.sub(r"[\s-]", "", unicodedata.normalize("NFKC", code)) if isinstance(code, str) else ""
-        if not hmac.compare_digest(given.encode("utf-8"), digits.encode("utf-8")):
-            tries -= 1
-            if tries <= 0:
-                self._code = None
-                return None, "코드를 여러 번 틀려서 버렸다 — PC에서 기기 등록을 다시 시작한다"
-            self._code = (digits, until, tries)
-            return None, f"코드가 맞지 않는다 — {tries}번 더 해 볼 수 있다"
-        self._code = None                     # 한 번만 쓴다
         now = self.clock()
         secret = secrets.token_urlsafe(32)
         label = " ".join("".join(c if c.isprintable() else " " for c in str(name or "")).split())[:40] or "기기"
 
-        def add(data):
+        def attempt(data):
+            pairing = data.get("pairing")
+            if not pairing:
+                return None, "PC에서 먼저 기기 등록을 시작한다"
+            if now > pairing["until"]:
+                del data["pairing"]
+                return None, "코드의 시간이 지났다 — PC에서 기기 등록을 다시 시작한다"
+            if not hmac.compare_digest(_digest(pairing["salt"] + given).encode("ascii"), pairing["hash"].encode("utf-8")):
+                tries = pairing["tries"] - 1
+                if tries <= 0:
+                    del data["pairing"]
+                    return None, "코드를 여러 번 틀려서 버렸다 — PC에서 기기 등록을 다시 시작한다"
+                pairing["tries"] = tries
+                return None, f"코드가 맞지 않는다 — {tries}번 더 해 볼 수 있다"
+            del data["pairing"]                   # 한 번만 쓴다
             data["devices"] = [d for d in data["devices"] if now - d["created"] <= DEVICE_SECONDS]
             if len(data["devices"]) >= DEVICE_LIMIT:
-                return None
+                return None, f"기기는 {DEVICE_LIMIT}대까지 등록한다 — 안 쓰는 기기를 끊고 다시 한다"
             taken = {d["id"] for d in data["devices"]}
             device_id = next(i for i in iter(lambda: "d-" + secrets.token_hex(4), None) if i not in taken)
             data["devices"].append({"id": device_id, "hash": _digest(secret), "name": label,
                                     "user": " ".join(str(user or "").split())[:100], "created": now, "seen": now})
-            return device_id
+            return f"{device_id}.{secret}", ""
 
-        device_id = self._change(add)
-        if device_id is None:
-            return None, f"기기는 {DEVICE_LIMIT}대까지 등록한다 — 안 쓰는 기기를 끊고 다시 한다"
-        return f"{device_id}.{secret}", ""
+        return self._change(attempt)
 
     def device(self, cookie_header) -> dict | None:
         """요청의 Cookie 머리에서 등록한 기기를 찾는다 → 없거나 값이 틀리거나 오래됐으면 None."""

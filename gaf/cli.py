@@ -472,8 +472,8 @@ async def _serve_locked(paths, port, starting):
     voice_key = os.environ.get(cloudvoice.ENV, "")
     clean_env(pass_env=app.config.claude["pass_env"])
     # 포트: 명령의 --port → gaf.json 의 server.port → 이 PC에 정해 둔 포트(원격으로 여는 프로젝트) → 빈 번호
+    # 공개 길의 문(앞문 · 뒷문)은 서버의 문지기가 연다 — PC 하나의 문이라 어느 프로젝트가 켰든 켜져 있는 지휘자가 같이 지킨다(1.12.0)
     server = Server(app, port=(app.config.server["port"] or projects.port_of(paths.root)) if port is None else port,
-                    public_port=projects.public_port_of(paths.root) if projects.serve_public(paths.root) else 0,
                     dictation=Dictation(env_key=voice_key, words=lambda: [app.config.project, *app.conductor.roles]))
     if not (paths.role_dir(app.config.lead_role) / "역할.md").is_file() and not has_roles(paths):
         # 총괄 없이 다른 역할만 둔 프로젝트는 그대로 돈다(일은 밖에서 `gaf assign` 으로 맡긴다) — 역할이 하나도 없을 때만 알린다
@@ -946,7 +946,7 @@ def _remote_access(args, paths):
     if action == "on":
         return _remote_on(args, paths)
     if action == "off":
-        if projects.serve_public(paths.root):
+        if any(row["public"] for row in projects.entries()):       # 공개 길은 PC 하나의 문 — 어느 프로젝트에서 꺼도 같다
             return _public_access(args, paths)
         serve_port, https = projects.serve_of(paths.root)
         if serve_port:
@@ -985,11 +985,14 @@ def _remote_access(args, paths):
     if not settings["hosts"]:
         print("원격 접속: 꺼짐 — 켜려면 python -m gaf remote on")
         return 0
-    serve_port, https = projects.serve_of(paths.root)
-    print("원격 접속: 켜짐(공개 길 — 인터넷에서 열린다 · 등록한 기기만)" if projects.serve_public(paths.root)
+    public = any(row["public"] for row in projects.entries())
+    address = remote_ops.address_of(paths)
+    print("원격 접속: 켜짐(공개 길 — 인터넷에서 열린다 · 등록한 기기만)" if public
           else "원격 접속: 켜짐(사설망 앞단을 거쳐 온 등록한 기기만)")
-    print("이 프로젝트의 주소: " + (tailnet.address(settings["hosts"][0], serve_port, https=https) if serve_port
-                              else "열지 않았다 — python -m gaf remote on"))
+    if public:
+        print("주소(이 PC 에 켜져 있는 프로젝트를 모두 이 주소 하나로 연다): " + address)
+    else:
+        print("이 프로젝트의 주소: " + (address or "열지 않았다 — python -m gaf remote on"))
     print("들이는 사람: " + (", ".join(settings["users"]) or "가리지 않음"))
     print(f"등록한 기기 {len(door.devices())}대 — python -m gaf remote devices")
     return 0

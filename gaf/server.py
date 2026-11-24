@@ -5,6 +5,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import functools
 import gzip
 import hashlib
 import hmac
@@ -18,10 +19,10 @@ from pathlib import Path, PureWindowsPath
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, changes, cloudvoice, desktop, launch, library, newproject, pickfolder, projects, remote_ops, tailnet
-from .app import read_server
+from . import __version__, changes, cloudvoice, desktop, doors, launch, library, newproject, pickfolder, projects, remote_ops, tailnet
+from .app import pid_alive, read_server
 from .dictation import Dictation, WAV_MAX_BYTES, STREAM_ID
-from .paths import Paths
+from .paths import Paths, _read_json
 from .remote import Remote, remote_file, read_settings
 
 HEADER_LIMIT = 64 * 1024
@@ -30,6 +31,12 @@ PUBLIC_CLIENTS = 32
 PUBLIC_HEADER_SECONDS = 5
 PUBLIC_OPEN_BODY = 4096
 PUBLIC_OPEN_SECONDS = 5
+DOOR_SECONDS = 2.0                                      # 문지기가 도는 간격(초) — 빈 앞문을 잡고, 공개 길이 꺼지면 문을 닫는다
+ROUTE_SECONDS = 2.0                                     # 넘길 뒷문의 포트를 쥐고 있는 시간(초) — 요청마다 문 파일을 읽지 않는다
+FORWARD_IDLE = 300                                      # 넘긴 요청의 답이 이만큼 조용하면 끊는다(이벤트 흐름은 25초마다 한 줄이 온다)
+GONE = "꺼져 있거나 목록에 없는 프로젝트다 — 프로젝트 목록에서 다시 고른다"
+UNANSWERED = "그 프로젝트가 답하지 못했다 — 잠시 뒤 다시 한다"
+DOOR_BUSY = "공개 문 포트를 열지 못했다 — 다른 프로그램이 쓰는지 확인한다"
 DRAIN_SECONDS, DRAIN_BYTES = 3.0, 64 * 1024 * 1024      # 오류 답 뒤에 읽지 않은 본문을 받아 버리는 한도
 STOP_WAIT = 3.0                                         # 멎을 때 듣는 소켓이 다 닫히기를 기다리는 시간(초)
 FILE_LIMIT = 50 * 1024 * 1024
@@ -148,8 +155,21 @@ class Server:
         self.url = ""
         self.shutdown = asyncio.Event()
         self._server = None
-        self.public_port = public_port
-        self._public_server = None
+        # 공개 길의 문(1.12.0 「주소 하나로 모든 프로젝트」 — gaf/doors.py): 앞문 = 공개 길이 넘겨 주는 이 PC 의 포트(켜져 있는 지휘자
+        # 가운데 하나가 쥐고, 등록한 기기의 요청을 고른 프로젝트로 넘긴다) · 뒷문 = 지휘자마다 여는 문(넘겨 받는 곳 — 넘기지 않는다).
+        self.public_port = public_port               # 손으로 정한 앞문(open_public · 생성자) — 문지기가 닫지 않는다
+        self._fronts: dict[int, asyncio.AbstractServer] = {}     # 이 지휘자가 쥔 앞문(포트 → 듣는 소켓)
+        self._homes: dict[int, str] = {}             # 앞문 포트 → 그 공개 길을 켠 프로젝트의 표(표 없는 요청이 갈 곳)
+        self._front_other: set[int] = set()          # 다른 지휘자가 쥐고 있는 앞문
+        self._front_blocked: dict[int, int] = {}     # 다른 프로그램이 쓰고 있는 앞문 포트 → 그렇게 본 횟수
+        self._door_server = None
+        self.door_port = 0
+        self._door_stamp: object = ()
+        self._door_rows: list[dict] = []
+        self._routes: dict[str, tuple[int, object, float]] = {}  # 표 → (뒷문 포트, 그때의 문 파일 모습, 본 시각)
+        self._keeper = None
+        self._door_told = False                      # 화면에 마지막으로 알린 「듣는 중인가」
+        self._door_lock = asyncio.Lock()             # 문을 여닫는 일은 한 번에 하나(문지기 · 켜기 · 손으로 열기가 겹치지 않게)
         self._public_clients: set[asyncio.Task] = set()
         self._public_writers: set[asyncio.StreamWriter] = set()
         self._remote_lock = asyncio.Lock()
@@ -178,27 +198,115 @@ class Server:
             raise
         if self.public_port:
             await self.open_public(self.public_port)
+        await self._keep_doors()
+        self._keeper = asyncio.create_task(self._keep_watch())
+
+    @functools.cached_property
+    def ident(self) -> str:
+        """이 프로젝트의 표(주소의 p) — 폴더 경로에서 나온다."""
+        return doors.ident(self.app.paths.root)
+
+    @property
+    def _public_server(self):
+        """손으로 정한 앞문의 듣는 소켓(없으면 None)."""
+        return self._fronts.get(self.public_port)
 
     async def open_public(self, port):
-        """공개 문만 따로 연다. 못 열어도 지휘자의 본 포트는 계속 듣는다."""
-        if self._public_server is not None and self.public_port == port:
-            return {"ok": True}
-        await self.close_public()
-        self.public_port = port
-        if not port:
-            return {"ok": False, "error": "공개 문 포트가 없다"}
-        try:
-            self._public_server = await asyncio.start_server(self._accept_public, "127.0.0.1", port, limit=HEADER_LIMIT)
-        except OSError:
-            reason = "공개 문 포트를 열지 못했다 — 다른 프로그램이 쓰는지 확인한다"
-            self.app.store.emit("error", message=reason)
-            return {"ok": False, "error": reason}
-        return {"ok": True}
+        """이 지휘자가 쥘 앞문 하나를 손으로 정해 연다(앞에 정한 것은 닫는다). 못 열어도 지휘자의 본 포트는 계속 듣는다.
 
-    async def close_public(self):
-        listener, self._public_server = self._public_server, None
+        다른 지휘자가 그 포트를 쥐고 있으면 고장이 아니다 — 그 지휘자가 이 프로젝트의 뒷문으로 넘겨 준다."""
+        async with self._door_lock:
+            if port and port == self.public_port and port in self._fronts:
+                return {"ok": True}
+            old = self.public_port
+            self.public_port = port
+            if old and old != port and old not in self._homes:
+                await self._close_front(old)
+            if not port:
+                return {"ok": False, "error": "공개 문 포트가 없다"}
+            if port in self._fronts or await self._open_front(port):
+                return {"ok": True}
+            if doors.front_held(port):
+                self._front_other.add(port)
+                return {"ok": True}
+            self.app.store.emit("error", message=DOOR_BUSY)
+            return {"ok": False, "error": DOOR_BUSY}
+
+    async def _open_front(self, port) -> bool:
+        try:
+            listener = await asyncio.start_server(functools.partial(self._accept_public, front=port), "127.0.0.1", port,
+                                                  limit=HEADER_LIMIT)
+        except OSError:
+            return False
+        self._fronts[port] = listener
+        self._front_other.discard(port)
+        self._front_blocked.pop(port, None)
+        self._note_door()
+        return True
+
+    async def _close_front(self, port) -> None:
+        listener = self._fronts.pop(port, None)
         if listener is not None:
             listener.close()
+            self._note_door()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(listener.wait_closed(), STOP_WAIT)
+
+    async def _open_door(self) -> None:
+        """뒷문 — 앞문을 쥔 지휘자가 이 프로젝트로 넘겨 줄 곳. 번호는 OS 가 고르고 문 파일에 적는다."""
+        if self._door_server is not None:
+            return
+        try:
+            listener = await asyncio.start_server(functools.partial(self._accept_public, front=None), "127.0.0.1", 0,
+                                                  limit=HEADER_LIMIT)
+        except OSError:
+            return
+        self._door_server, self.door_port = listener, listener.sockets[0].getsockname()[1]
+        self._note_door()
+
+    async def _close_door(self) -> None:
+        if self._door_server is None and not self.door_port:
+            return
+        listener, self._door_server, self.door_port = self._door_server, None, 0
+        with contextlib.suppress(OSError):
+            doors.clear(self.ident)
+        if listener is not None:
+            listener.close()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(listener.wait_closed(), STOP_WAIT)
+
+    def _note_door(self) -> None:
+        if self.door_port:
+            with contextlib.suppress(OSError):
+                doors.note(self.ident, self.door_port, self._fronts)
+
+    def _doors(self) -> list[dict]:
+        """공개 길을 켠 프로젝트의 줄들(문 줄) — 프로젝트 목록 파일이 바뀔 때만 다시 읽는다(공개 문으로 온 요청마다 본다)."""
+        try:
+            status = projects._file().stat()
+            stamp = (status.st_mtime_ns, status.st_size)
+        except OSError:
+            stamp = None
+        if stamp != self._door_stamp:
+            rows = projects.read_entries() if stamp is not None else []
+            if rows is None:
+                # 파일은 있는데 읽지 못했다(백신 · 색인이 잠깐 쥐었다) — 앞에 읽은 대로 두고 다음에 다시 읽는다. 「꺼졌다」로
+                # 굳히면 목록 파일이 다시 바뀔 때까지 공개 문이 막힌다(11-24 검수).
+                return self._door_rows
+            self._door_rows = [row for row in rows if row["public"]]
+            self._door_stamp = stamp
+        return self._door_rows
+
+    def _home_running(self, port) -> bool:
+        """그 앞문의 공개 길을 켠 프로젝트의 지휘자가 떠 있나 — 문 파일이 없어도(옛 판 1.11 까지 · 막 뜨는 중) 본다."""
+        row = next((row for row in self._door_rows if row["public_port"] == port), None)
+        if row is None or doors.ident(row["root"]) == self.ident:
+            return False
+        record = _read_json(Paths(Path(row["root"])).server)
+        return bool(record) and pid_alive(record.get("pid"))
+
+    async def _drop_public(self) -> None:
+        """공개 문으로 들어와 있는 연결을 끊는다(이벤트 흐름 · 넘기는 중인 것까지)."""
         for writer in tuple(self._public_writers):
             writer.close()
         tasks = tuple(self._public_clients)
@@ -206,20 +314,97 @@ class Server:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        if listener is not None:
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(listener.wait_closed(), STOP_WAIT)
 
-    def _accept_public(self, reader, writer):
+    async def _keep_doors(self) -> None:
+        """문지기 한 번 — 공개 길이 켜져 있으면 뒷문을 열어 두고 빈 앞문을 잡는다 · 꺼져 있으면 닫는다.
+
+        공개 길은 PC 하나의 것이다(어느 프로젝트에서 켰든): 앞문을 쥔 지휘자가 꺼지면 켜져 있는 다른 지휘자가 다음 번에 잡는다.
+        손으로 정한 앞문(open_public)은 건드리지 않는다."""
+        async with self._door_lock:
+            await self._keep_doors_locked()
+            # 듣는 중인지가 바뀌었으면 이벤트 하나로 알린다 — 열려 있는 PC 화면이 상태를 다시 받아 원격 칸(주소 · QR · 「닫혀 있다」)을
+            # 고친다. 화면은 이벤트가 올 때만 상태를 받는다: 알리지 않으면 문이 스스로 열리거나 닫혀도 그 칸이 그대로다.
+            listening = bool(self._fronts or self._front_other)
+            if listening != self._door_told:
+                self._door_told = listening
+                with contextlib.suppress(Exception):
+                    self.app.store.emit("remote", data={"action": "door", "listening": listening})
+
+    async def _keep_doors_locked(self) -> None:
+        rows = self._doors()
+        self._homes = {row["public_port"]: doors.ident(row["root"]) for row in rows if row["public_port"]}
+        if not rows:
+            was_open = self._door_server is not None or any(port != self.public_port for port in self._fronts)
+            for port in [port for port in self._fronts if port != self.public_port]:
+                await self._close_front(port)
+            self._front_other.clear()
+            self._front_blocked.clear()
+            await self._close_door()
+            if was_open:
+                # 공개 길이 방금 꺼졌다(다른 프로젝트의 화면 · 명령줄에서 껐어도) — 문만 닫으면 이미 이어 둔 이벤트 흐름이
+                # 끈 뒤에도 흘러간다. 들어와 있는 연결까지 끊는다(11-24 검수).
+                await self._drop_public()
+            return
+        await self._open_door()
+        if self.door_port and not doors.same(self.ident, self.door_port, self._fronts):
+            self._note_door()                            # 문 파일이 사라졌거나 틀어졌다(처음에 못 적었다 · 누가 지웠다) — 다시 적는다
+        for port in self._homes:
+            if port in self._fronts or await self._open_front(port):
+                continue
+            # 다른 지휘자가 쥐고 있다 — 그 지휘자가 넘겨 준다. 문 파일이 없어도 그 공개 길을 켠 프로젝트의 지휘자가 떠 있으면
+            # (새 판으로 올린 뒤 아직 다시 켜지 않은 옛 판이 제 공개 문을 쥐고 있다) 다른 프로그램으로 보지 않는다.
+            if doors.front_held(port) or self._home_running(port):
+                self._front_other.add(port)
+                self._front_blocked.pop(port, None)
+                continue
+            self._front_other.discard(port)
+            seen = self._front_blocked[port] = self._front_blocked.get(port, 0) + 1
+            if seen == 2:                                # 한 번 더 봐도 그대로다(막 쥔 지휘자가 문 파일을 적는 틈이 아니다) — 한 번만 알린다
+                self.app.store.emit("error", message=DOOR_BUSY)
+        for port in [port for port in self._fronts if port not in self._homes and port != self.public_port]:
+            await self._close_front(port)
+        self._front_other &= set(self._homes) | {self.public_port}
+        for port in [port for port in self._front_blocked if port not in self._homes]:
+            del self._front_blocked[port]
+
+    async def _keep_watch(self) -> None:
+        while True:
+            await asyncio.sleep(DOOR_SECONDS)
+            with contextlib.suppress(Exception):         # 문지기는 한 번 틀려도 멎지 않는다
+                await self._keep_doors()
+
+    async def close_public(self):
+        """공개 길의 문을 모두 닫는다(앞문 · 뒷문 · 그 문으로 들어와 있는 연결). 돌고 있는 문지기가 끝난 뒤에 닫는다 —
+        닫은 것을 그 문지기가 도로 열지 않게."""
+        async with self._door_lock:
+            listeners = [*self._fronts.values(), *([self._door_server] if self._door_server is not None else [])]
+            self._fronts.clear()
+            self._front_other.clear()
+            self._front_blocked.clear()
+            self._door_server, self.door_port = None, 0
+            with contextlib.suppress(OSError):
+                doors.clear(self.ident)
+            for listener in listeners:
+                listener.close()
+            await self._drop_public()
+            for listener in listeners:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(listener.wait_closed(), STOP_WAIT)
+
+    def _accept_public(self, reader, writer, front=None):
         if len(self._public_clients) >= PUBLIC_CLIENTS:
             writer.close()
             return
         self._public_writers.add(writer)
-        task = asyncio.create_task(self._handle(reader, writer, public=True))
+        task = asyncio.create_task(self._handle(reader, writer, public=True, front=front))
         self._public_clients.add(task)
         task.add_done_callback(self._public_clients.discard)
 
     async def stop(self) -> None:
+        keeper, self._keeper = self._keeper, None
+        if keeper is not None:
+            keeper.cancel()
+            await asyncio.gather(keeper, return_exceptions=True)
         await self.close_public()
         listener, self._server = self._server, None
         try:
@@ -385,7 +570,8 @@ class Server:
                 hostname = (urlsplit("//" + host).hostname or "").rstrip(".")
             except ValueError:
                 raise RequestError(403, "허용하지 않은 Host다") from None
-            if not projects.serve_public(self.app.paths.root) or hostname in ("127.0.0.1", "localhost", "::1"):
+            # 공개 길은 PC 하나의 것이다(1.12.0) — 어느 프로젝트에서 켰든 켜져 있으면 들이고, 꺼지면 모든 지휘자가 바로 막는다.
+            if not self._doors() or hostname in ("127.0.0.1", "localhost", "::1"):
                 raise RequestError(403, "공개 문으로 들일 수 없는 요청이다")
         try:
             url = urlsplit(target)
@@ -434,6 +620,8 @@ class Server:
                 raise RequestError(400, "JSON을 읽을 수 없다") from None
             if not isinstance(data, dict):
                 raise RequestError(400, "JSON은 객체여야 한다")
+        if public and response is not None:
+            response["raw"] = (block, body)          # 다른 프로젝트로 넘길 때 받은 그대로 보낸다(_forward)
         return method, path, query, headers, data, peer
 
     def _admit_remote(self, method, path, headers, host, peer) -> None:
@@ -456,7 +644,95 @@ class Server:
         if peer["device"] is None:
             raise RequestError(401, "등록하지 않은 기기다", pair=True)
 
-    async def _handle(self, reader, writer, *, public=False):
+    def _door_of(self, ident: str) -> int:
+        """그 표의 프로젝트가 떠 있으면 뒷문 포트(없으면 0).
+
+        요청마다 문 파일이 그대로인지만 본다(stat): 없어졌으면 꺼진 것이다 — 쥐고 있던 포트로 가 보지 않는다(그 포트를 다른
+        프로그램이 받았을 수 있다). 바뀌었으면(다시 켜졌다) 새로 읽는다. 그대로면 ROUTE_SECONDS 동안은 읽지 않는다."""
+        stamp = doors.stamp(ident)
+        if stamp is None:
+            self._routes.pop(ident, None)
+            return 0
+        now = monotonic()
+        port, seen, at = self._routes.get(ident, (0, None, 0.0))
+        if port and seen == stamp and now - at <= ROUTE_SECONDS:
+            return port
+        port = doors.port_of(ident)
+        if port:
+            if len(self._routes) >= 64:
+                self._routes.clear()
+            self._routes[ident] = (port, stamp, now)
+        else:
+            self._routes.pop(ident, None)
+        return port
+
+    def _elsewhere(self, front, path, query, peer) -> tuple[int, str]:
+        """공개 문으로 온 요청을 넘길 곳 → (뒷문 포트, 그 표) · 여기서 답하면 (0, "").
+
+        등록한 기기의 요청만 넘긴다 — 등록 전의 화면 한 장 · 등록은 받은 지휘자가 답한다. 주소의 p 가 프로젝트의 표다. 표가 가리키는
+        프로젝트가 꺼져 있으면 일은 거절한다(409 — 엉뚱한 프로젝트가 대신 받지 않게) · 화면 한 장(GET /)만은 준다. 표가 없으면 그
+        앞문의 공개 길을 켠 프로젝트로 넘기고, 그 프로젝트가 꺼져 있으면 여기서 답한다. 뒷문(front 가 None)은 넘기지 않는다."""
+        if peer["device"] is None or path == "/favicon.ico" or path in OPEN_ASSETS:
+            return 0, ""
+        wanted = query.get("p", [""])[0]
+        if wanted and wanted != self.ident:
+            port = self._door_of(wanted) if front is not None and doors.IDENT.fullmatch(wanted) else 0
+            if port:
+                return port, wanted
+            if path != "/":
+                raise RequestError(409, GONE, project_off=True)
+            wanted = ""
+        if wanted or front is None:
+            return 0, ""
+        home = self._homes.get(front, "")
+        return (self._door_of(home), "") if home and home != self.ident else (0, "")
+
+    async def _forward(self, reader, writer, port, response) -> bool:
+        """받은 요청을 그 뒷문으로 그대로 보내고 답을 그대로 돌려준다 → 잇지 못했으면 False(아무것도 보내지 않았다).
+
+        받는 지휘자가 이름 · 기기 · PC 전용 길을 처음부터 다시 가린다. 연결 하나에 요청 하나다(답이 끝나면 저쪽이 닫는다 — 이벤트
+        흐름은 기기가 끊을 때까지). 기기 쪽이 끊으면 저쪽에도 끝을 알려 구독이 남지 않게 한다."""
+        try:
+            up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 5)
+        except (OSError, asyncio.TimeoutError):
+            return False
+
+        async def watch():
+            with contextlib.suppress(Exception):
+                await reader.read(1)
+            with contextlib.suppress(Exception):
+                up_writer.write_eof()
+
+        watcher = asyncio.create_task(watch())
+        try:
+            try:
+                up_writer.writelines(response["raw"])
+                await asyncio.wait_for(up_writer.drain(), 60)
+            except (ConnectionError, OSError, asyncio.TimeoutError):
+                raise RequestError(502, UNANSWERED) from None
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(up_reader.read(65536), FORWARD_IDLE)
+                except (ConnectionError, OSError, asyncio.TimeoutError):
+                    if response.get("relayed"):
+                        break                            # 답을 보내던 중에 끊겼다 — 여기까지만 보내고 닫는다
+                    raise RequestError(502, UNANSWERED) from None      # 답의 첫 바이트 전이다 — 빈 답 대신 까닭을 준다
+                if not chunk:
+                    break
+                response["relayed"] = True
+                writer.write(chunk)
+                await asyncio.wait_for(writer.drain(), 60)
+        finally:
+            watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
+            up_writer.close()
+            with contextlib.suppress(ConnectionError, OSError, asyncio.TimeoutError):
+                await asyncio.wait_for(up_writer.wait_closed(), 2)
+        if not response.get("relayed"):
+            raise RequestError(502, UNANSWERED)          # 저쪽이 답 없이 닫았다(연결 한도에 닿았거나 꺼지는 중이다)
+        return True
+
+    async def _handle(self, reader, writer, *, public=False, front=None):
         sent = False
         response = {}
 
@@ -466,6 +742,20 @@ class Server:
         try:
             method, path, query, headers, data, peer = await self._request(reader, public=public, response=response)
             peer["gone"] = reader.at_eof          # 답을 기다리는 동안 화면 쪽이 연결을 닫았나(폴더 선택 창이 본다)
+            if public:
+                port, wanted = self._elsewhere(front, path, query, peer)
+                if port:
+                    if await self._forward(reader, writer, port, response):
+                        return
+                    # 그 뒷문에 잇지 못했다(쥐고 있던 포트가 낡았다) — 문 파일을 새로 읽어, 포트가 바뀌었으면 한 번 더 해 본다
+                    target = wanted or self._homes.get(front, "")
+                    self._routes.pop(target, None)
+                    again = doors.port_of(target)
+                    if again and again != port and await self._forward(reader, writer, again, response):
+                        return
+                    if wanted and path != "/":
+                        raise RequestError(409, GONE, project_off=True)
+                response.pop("raw", None)            # 여기서 답한다 — 큰 몸을 쥐고 있지 않는다
             if path.startswith("/api/") and not getattr(self.app.conductor, "started", True):
                 # serve 는 포트를 먼저 잡고(세션에 줄 GAF_PORT) 지휘자를 켠다 — 그 사이에 온 요청
                 raise RequestError(503, "지휘자가 뜨는 중이거나 꺼지는 중이다 — 잠시 뒤 다시 한다")
@@ -555,7 +845,7 @@ class Server:
                 if path == "/api/shutdown" and result.get("stopped"):
                     self.shutdown.set()
         except RequestError as exc:
-            if not sent:
+            if not sent and not response.get("relayed"):
                 with contextlib.suppress(ConnectionError, OSError, asyncio.TimeoutError):
                     await send(exc.status, {"ok": False, "error": exc.message, **exc.extra})
                 if not public or exc.status != 408:
@@ -566,7 +856,7 @@ class Server:
             # 예외에는 요청 주소나 접근 값이 섞일 수 있으므로 원문을 적지 않는다.
             with contextlib.suppress(Exception):
                 self.app.store.emit("error", message="뷰어 요청 처리 중 서버 안의 오류")
-            if not sent:
+            if not sent and not response.get("relayed"):
                 with contextlib.suppress(ConnectionError, OSError, asyncio.TimeoutError):
                     await send(500, {"ok": False, "error": "서버 안의 오류"})
         finally:
@@ -602,8 +892,9 @@ class Server:
         {"open": 폴더} 꺼진 프로젝트의 지휘자를 띄운다 · {"add": {"folder"} 또는 {"parent", "name"}} 프로젝트를 더해 켠다(1.8.0) ·
         {"pick": true} 이 PC 에 폴더 선택 창을 띄워 고른 경로를 준다 · {"forget": 폴더} 꺼진 프로젝트를 목록에서 뺀다(폴더는 그대로) ·
         {"seen": true} 지금 이 프로젝트의 PC 화면을 보고 있다(「마지막에 쓰던 프로젝트」가 된다).
-        PC 화면에는 떠 있는 프로젝트의 주소(접근 값이 들어 있다)를 같이 준다. 원격 기기에는 주소 · 폴더를 주지 않고
-        원격으로 여는 포트만 준다 — 화면이 제 주소의 이름에 그 포트를 붙여 간다.
+        PC 화면에는 떠 있는 프로젝트의 주소(접근 값이 들어 있다)를 같이 준다. 원격 기기에는 주소 · 폴더를 주지 않는다.
+        공개 길(주소 하나 — 1.12.0)로 온 기기에는 켜져 있는 프로젝트의 표(id)를 준다 — 화면이 같은 주소에 `?p=<표>` 를 붙여 간다
+        (one). 사설망 길은 전처럼 원격으로 여는 포트만 준다 — 화면이 제 주소의 이름에 그 포트를 붙여 간다.
         """
         here = self.app.paths.root
         entries = projects.entries()
@@ -644,6 +935,10 @@ class Server:
             view["current"] = current
             if peer["remote"]:
                 view.update(serve=row["serve"], https=row["https"])
+                if peer["public"] and row["running"]:
+                    ident = doors.ident(row["root"])
+                    if ident == self.ident or doors.port_of(ident):      # 뒷문을 열어 둔 것만 넘겨 줄 수 있다
+                        view["id"] = ident
             else:
                 view["root"] = row["root"]
                 if row["running"] and not current:
@@ -653,6 +948,8 @@ class Server:
             out.append(view)
         out.sort(key=lambda view: not view["current"])          # 지금 프로젝트를 맨 앞에(나머지는 최근에 연 차례)
         listed = {"projects": out, "can_open": not peer["remote"]}
+        if peer["public"]:
+            listed["one"] = True                                 # 주소 하나 — 다른 프로젝트는 같은 주소의 ?p=<표> 로 간다
         if not peer["remote"]:
             listed["base"] = newproject.base_folder(here)       # 새 폴더를 만들 기본 위치(이 PC 의 경로 — 원격에는 주지 않는다)
         return listed
@@ -746,14 +1043,17 @@ class Server:
             rows, settings = projects.entries(), read_settings()
             here = os.path.normcase(str(self.app.paths.root.resolve()))
             row = next((r for r in rows if os.path.normcase(str(Path(r["root"]).resolve())) == here), {})
-            public, hosts = row.get("public", False), settings["hosts"]
-            # 다른 프로젝트만 공개로 열었어도 이 프로젝트에서는 켜기 단추를 보여 준다.
-            enabled = bool(hosts) and (public or not any(r["public"] for r in rows))
-            address = tailnet.address(hosts[0], row["serve"], https=row["https"]) if hosts and row.get("serve") else ""
+            # 공개 길은 PC 하나의 문이다(1.12.0) — 어느 프로젝트에서 켰든 모든 프로젝트의 화면이 같은 주소 · 같은 끄기를 보인다.
+            door = row if row.get("public") else next((r for r in rows if r["public"]), None)
+            public, hosts = door is not None, settings["hosts"]
+            enabled = bool(hosts)
+            shown = door or row
+            address = tailnet.address(hosts[0], shown["serve"], https=shown["https"]) if hosts and shown.get("serve") else ""
             self._remote_cached = {"enabled": enabled, "via": "local", "devices": len(self.remote.devices()),
                                    "public": public, "address": address}
             self._remote_stamp = stamps
-        return {**self._remote_cached, "listening": self._public_server is not None}
+        # 듣는 중: 이 지휘자가 앞문을 쥐었거나, 다른 지휘자가 쥐고 이 프로젝트로 넘겨 준다(문지기가 본 것 — 여기서 파일을 읽지 않는다)
+        return {**self._remote_cached, "listening": bool(self._fronts or self._front_other)}
 
     def _voice_ready(self, *, refresh=False):
         now = monotonic()
@@ -852,11 +1152,17 @@ class Server:
             if action == "on":
                 result = await asyncio.to_thread(remote_ops.public_on, self.app.paths, funnel_port=port, find=tailnet.find)
                 if result["ok"]:
-                    opened = await self.open_public(result["public_port"])
+                    await self._keep_doors()                 # 뒷문을 열고 빈 앞문을 잡는다(다른 지휘자가 쥐고 있으면 그대로 둔다)
+                    front = result["public_port"]
+                    if front in self._homes:
+                        opened = {"ok": front in self._fronts or front in self._front_other, "error": DOOR_BUSY}
+                    else:                                    # 목록에 그 포트의 문 줄이 없다 — 손으로 연다
+                        opened = await self.open_public(front)
                     if not opened["ok"]:
                         result = {**result, "ok": False, "lines": [opened["error"]]}
             else:
                 result = await asyncio.to_thread(remote_ops.public_off, self.app.paths, find=tailnet.find)
+                self.public_port = 0
                 await self.close_public()
             return {"ok": result["ok"], "address": result.get("address", ""), "lines": result["lines"],
                     "warn": result.get("warn", "")}
@@ -879,6 +1185,8 @@ class Server:
             return {**c.snapshot(), "notices": c.notice_views(remote=peer["remote"]),
                     "seq": store.seq, "remote": self._remote_view(peer),
                     "voice": "pc" if self._voice_ready() else "browser", "version": __version__,
+                    # 공개 문으로 온 화면에는 이 프로젝트의 표를 준다 — 화면이 주소 · 요청에 붙여(p) 이 프로젝트에 머문다(1.12.0)
+                    **({"project_id": self.ident} if peer["public"] else {}),
                     # GPT 받아쓰기의 키가 어디서 왔나(「화면」 · 「환경변수」 · 없으면 빈 글 — 값은 싣지 않는다 · 1.9.0)
                     "voice_gpt": self._voice_source()}
         if path == "/api/dictate":
@@ -890,7 +1198,7 @@ class Server:
         if path == "/api/remote/qr":
             address = remote_ops.address_of(self.app.paths)
             if not address:
-                raise RequestError(400, "이 프로젝트의 원격 접속이 꺼져 있다")
+                raise RequestError(400, "원격 접속이 꺼져 있다")
             from .vendor.qrcodegen import QrCode
 
             code = QrCode.encode_text(address, QrCode.Ecc.MEDIUM)
