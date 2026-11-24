@@ -30,7 +30,8 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 .icon-button:hover:not(:disabled){color:var(--text);border-color:transparent}
 .icon-button.on,.icon-button.on:hover:not(:disabled){color:var(--bad)}
 .icon-button.busy{opacity:.55}
-#mic-status{display:flex;align-items:center;gap:6px;min-width:0;font-size:calc(12px*var(--u));color:var(--muted)}#mic-text{white-space:nowrap}#mic-status .live-dots{gap:1px}
+#mic-status{display:flex;align-items:center;gap:6px;min-width:0;font-size:calc(12px*var(--u));color:var(--muted)}
+#mic{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}#mic-text{white-space:nowrap}#mic-status .live-dots{gap:1px}
 #mic-meter{--level:.15;width:28px;height:12px;flex:none;background:var(--work);transform:scaleY(var(--level));transform-origin:center}
 .message{color:var(--warn);white-space:pre-wrap;overflow-wrap:anywhere;font-size:calc(13px*var(--u))}.message:empty{display:none}.warn{color:var(--warn)}
 .need{color:var(--need)}.blocked{color:var(--bad)}.working,.waiting{color:var(--work)}.idle{color:var(--ok)}.off{color:var(--off)}
@@ -68,6 +69,7 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 .msg.user .bubble{background:var(--bubble);border-radius:16px;padding:10px 14px;max-width:min(88%,calc(640px*var(--u)));white-space:pre-wrap;overflow-wrap:anywhere}
 .meta{font-size:calc(12px*var(--u));color:var(--muted)}.msg.user .meta{margin-top:4px}
 .msg.pending .bubble{opacity:.55}.msg.pending .bubble small{display:block}.msg.pending .meta button{font-size:inherit}
+.take{text-decoration:none;margin-left:4px}
 .sub{margin-left:8px;padding-left:12px;border-left:1px solid var(--line)}
 .prose{overflow-wrap:anywhere}.prose p{margin:0 0 10px;white-space:pre-wrap}.prose ul{margin:0 0 10px;padding-left:20px}.prose li{margin:3px 0}.prose .h{font-weight:700}
 .prose>:last-child{margin-bottom:0}.prose code{font-size:.92em;background:#26292B;border-radius:4px;padding:1px 5px}
@@ -190,7 +192,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div class="dock"><div class="column">
 <section id="decisions" hidden aria-label="내가 정할 것"><div id="decision-list"></div></section>
 <div id="live" class="live" hidden><span class="live-dots" aria-hidden="true"><i>•</i><i>•</i><i>•</i></span><span id="live-text"></span></div>
-<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="model-edit" type="button" class="mini" hidden>바꾸기</button><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div></div></form>
+<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span id="model" class="muted"></span><button id="model-edit" type="button" class="mini" hidden>바꾸기</button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button></div></form>
 <p id="message" class="message" role="status"></p>
 </div></div>
 </section>
@@ -421,10 +423,27 @@ function renderPending() {
     const row = node('div', null, 'msg user pending'), bubble = node('div', item.text, 'bubble'), meta = node('div', null, 'meta');
     if (item.pictures && item.pictures.length) bubble.append(node('small', '그림 ' + item.pictures.length + '장'));
     if (item.status === 'failed') meta.append(button('못 보냄 — 다시 보내기', () => sendPending(item), 'link'));
-    else meta.textContent = item.status === 'received' ? '받음 · 차례를 기다리는 중' : '보냄 · 기다리는 중';
+    else {
+      meta.textContent = item.status === 'received' ? '받음 · 차례를 기다리는 중' : '보냄 · 기다리는 중';
+      if (item.queued) {                             // 세션이 아직 읽지 않았다 — 거둘 수 있다
+        const take = button('✕', () => takeBack(item), 'link take'); take.setAttribute('aria-label', '거두기 — 입력칸으로 되돌린다'); take.title = '거두어 입력칸으로 되돌린다';
+        meta.append(take);
+      }
+    }
     row.append(bubble, meta); box.append(row);
   }
   if (box.children.length) $('empty').hidden = true;
+}
+// 세션이 아직 읽지 않은 내 글을 거둔다 — 글은 입력칸으로 되돌아온다(Claude Code 의 대기 글 ✕ · 11-24).
+async function takeBack(item) {
+  let reply;
+  try { reply = await api('/api/unsend', {role:item.name, at:item.at, text:item.wait}); }
+  catch (error) { return message(error.message); }
+  if (item.key) consumedWaiting.add(item.key);
+  outboxes.set(item.name, (outboxes.get(item.name) || []).filter(p => p !== item));
+  if (selected === item.name) { const text = $('text'); text.value = [reply.text, text.value].filter(Boolean).join('\n'); grow(); sendOrStop(); text.focus(); }
+  else drafts.set(item.name, [reply.text, drafts.get(item.name)].filter(Boolean).join('\n'));
+  renderPending(); scheduleState(true);
 }
 function syncWaiting() {
   const keys = new Set();
@@ -436,7 +455,7 @@ function syncWaiting() {
       counts.set(base,n+1); keys.add(key); if (consumedWaiting.has(key)) continue;
       let item = items.find(p => p.key === key) || items.find(p => !p.key && p.status !== 'failed' && waitingText(p) === wait.text);
       if (!item) { item = {name:role.name,text:wait.text,remote:true,after:(talks.get(role.name) || (selected === role.name ? talk : {})).last || 0}; items.push(item); }
-      Object.assign(item,{key,at:wait.at,queued:true,status:'received'});
+      Object.assign(item,{key,at:wait.at,wait:wait.text,queued:true,status:'received'});
     }
     outboxes.set(role.name,items);
   }
@@ -796,12 +815,18 @@ function updateComposer() {
   if ([recording, converting].some(c => c && c.sid && !state.roles.some(r => r.name === c.session && !r.off))) micCancel();
   $('text-label').textContent = role ? role.name + '에게' : '';
   $('text').placeholder = !role ? '' : off ? '꺼 둔 역할이다 — 켜면 글을 보낼 수 있다' : lead ? role.name + '에게 맡길 일이나 보탤 말을 적는다' : role.name + '에게 보낼 글을 적는다';
-  // 실시간 받아쓰기 동안(듣는 중 · 멈춘 뒤 마지막 글을 받는 중)은 입력칸을 잠근다 — 그사이 친 글이 마지막 글에 덮이지 않게
-  $('text').readOnly = sending || !!recording?.sid || !!converting?.sid; $('text').disabled = off; $('send').disabled = sending || off;
+  // 받아쓰는 동안에도 입력칸을 잠그지 않는다(Claude Code 와 같게 · 11-24) — 그사이 친 글은 micTyped 가 지킨다
+  $('text').readOnly = sending; $('text').disabled = off; $('send').disabled = sending || off;
   $('image-add').hidden = !lead; $('image-add').disabled = sending; $('image-files').disabled = sending || !lead; $('attachments').hidden = !lead;
   $('attachments').querySelectorAll('button').forEach(b => { b.disabled = sending; });
   $('model').textContent = role ? [role.engine, role.model, role.effort].filter(Boolean).join(' · ') : ''; $('model-edit').hidden = !role;
-  $('stop').hidden = !(role && (role.status === 'working' || role.status === 'waiting' || role.queue > 0)); $('stop').disabled = sending;
+  sendOrStop();
+}
+// 보내기와 멈춤은 한 자리의 단추다(Claude Code 와 같게 · 11-24): 일하는 중이고 보낼 것이 없으면 멈춤, 아니면 보내기.
+function sendOrStop() {
+  const role = current(), busy = !!role && (role.status === 'working' || role.status === 'waiting' || role.queue > 0);
+  const stop = busy && !$('text').value.trim() && !attachments.length;
+  $('stop').hidden = !stop; $('stop').disabled = sending; $('send').hidden = stop;
 }
 // ── 내가 정할 것(그 세션의 대화 아래 · 입력칸 위) ─────────────────────────────
 function decisionCard(decision) {
@@ -1786,9 +1811,10 @@ function base64(file) {
 // 총괄에게는 say(그림도), 다른 역할에게는 send(글만)로 보낸다.
 $('composer').addEventListener('submit', async event => {
   event.preventDefault(); const role = current(); if (sending || composing || !role) return;
-  if (recording || converting) {
-    if (recording) micFinish();
-    message('받아 적은 글이 들어오면 다시 보낸다'); return;
+  if (recording || converting) {                                  // 듣는 중의 Enter — 멈추고, 마지막 글이 오면 그대로 보낸다(한 번에)
+    (recording || converting).send = true;
+    if (recording) micFinish(true);
+    return;
   }
   micCancel();                                                    // 보낸 뒤에 늦게 온 말이 빈 입력칸에 들어가지 않게
   const text = $('text').value, name = role.name, pictures = role.lead ? attachments : [];
@@ -1801,10 +1827,41 @@ $('composer').addEventListener('submit', async event => {
 $('text').addEventListener('input', grow);
 $('text').addEventListener('compositionstart', () => { composing = true; });
 $('text').addEventListener('compositionend', () => { composing = false; });
-// PC에서는 Enter 로 보낸다(Shift+Enter 는 줄 바꿈 · 한글을 짜는 중이면 보내지 않는다). 손가락으로 쓰는 기기에서는 Enter 가 줄 바꿈이다.
-$('text').addEventListener('keydown', event => {
-  if (event.key === 'Enter' && !event.shiftKey && !touch.matches && !event.isComposing && !composing && event.keyCode !== 229) { event.preventDefault(); $('composer').requestSubmit(); }
-});
+// ── 입력칸의 키(Claude Code 와 같게 · 11-24 사용자 「클로드코드랑 동일하게 맞춰줘」)
+// PC에서는 Enter 로 보낸다(Shift+Enter · Ctrl+J 는 줄 바꿈 · 한글을 짜는 중이면 보내지 않는다). 손가락으로 쓰는 기기에서는 Enter 가 줄 바꿈이다.
+// 위 · 아래 화살표는 앞서 보낸 글을 다시 불러온다(입력칸이 비었을 때 시작한다 — 고치면 그 글이 내 글이 된다).
+let recall = null;
+$('text').addEventListener('input', () => { recall = null; sendOrStop(); });
+function recallStep(back) {
+  const text = $('text');
+  if (!recall) {
+    if (!back || text.value) return false;
+    recall = {at:-1, list:[...new Set([...$('chat').querySelectorAll('.msg.user .bubble')].map(b => b.textContent).filter(t => t.trim()).reverse())]};
+  }
+  const at = recall.at + (back ? 1 : -1);
+  if (at >= recall.list.length) return true;
+  const list = recall.list; recall = at < 0 ? null : {at, list};
+  text.value = at < 0 ? '' : list[at]; grow(); sendOrStop(); text.setSelectionRange(text.value.length, text.value.length);
+  return true;
+}
+function composerKey(event) {
+  if (event.isComposing || composing || event.keyCode === 229) return;
+  const text = $('text');
+  if (event.key === 'Enter' && !event.shiftKey && !touch.matches) { event.preventDefault(); $('composer').requestSubmit(); }
+  else if (event.code === 'KeyJ' && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) { event.preventDefault(); text.setRangeText('\n', text.selectionStart, text.selectionEnd, 'end'); grow(); sendOrStop(); }
+  else if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && recallStep(event.key === 'ArrowUp')) event.preventDefault();
+}
+$('text').addEventListener('keydown', composerKey);
+// Esc — 듣는 중이면 받아쓰기를 멈추고(글은 남는다), 아니면 일하는 역할을 멈춘다. 창 · 메뉴가 열려 있거나 다른 칸에 쓰는 중이면 그쪽 것이다.
+function escapeKey(event) {
+  if (event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.keyCode === 229 || menuAnchor || document.querySelector('dialog[open]')) return;
+  const at = event.target;
+  if (at !== $('text') && at && /^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName || '')) return;
+  const role = current();
+  if (recording || listening || converting) { event.preventDefault(); if (recording) micFinish(true); else if (listening) listening.stop(); }
+  else if (role && role.status === 'working' && !sending) { event.preventDefault(); act('/api/stop', {role:selected}); }
+}
+document.addEventListener('keydown', escapeKey);
 $('stop').addEventListener('click', () => { if (selected) act('/api/stop', {role:selected}); });
 // ── 음성 입력(11-16 사용자 「클로드 마이크랑 동일한 방식으로」) ──────────────────────────────────────────
 // 마이크를 누르면 듣고, 말하는 대로 입력칸에 글이 들어가고, 다시 누르면 멈춘다. 보내기는 사람이 누른다(스스로 보내지 않는다).
@@ -1850,21 +1907,47 @@ document.addEventListener('visibilitychange', () => { micMeterFrame(); micStatus
 function micPC() {
   return state && state.voice === 'pc' && navigator.mediaDevices && window.isSecureContext;
 }
+// 누르는 법(Claude Code 와 같게 · 11-24): 짧게 누르면 켜고 끈다 · 길게(0.2초) 누르면 누르는 동안만 듣는다 · Ctrl+D 도 같다.
+let micHold = null, micHeld = false, micKey = null;
+function micToggle() {
+  if (converting) return;
+  if (recording) return micFinish();
+  if (listening) listening.stop(); else return micStart();
+}
+function micStop() { if (recording) micFinish(true); else if (listening) listening.stop(); }
+function micUp() {
+  const hold = micHold; micHold = null; if (!hold) return;
+  clearTimeout(hold.timer);
+  if (hold.on) { micHeld = true; setTimeout(() => { micHeld = false; }, 0); micStop(); }      // 뗄 때 따라오는 click 은 넘긴다
+}
+function micKeys(event) {
+  if (event.type === 'keyup') {
+    if (micKey === null || !(event.code === 'KeyD' || event.key === 'Control' || event.key === 'Meta')) return;
+    const held = performance.now() - micKey >= 200; micKey = null; if (held) micStop();
+  } else if (event.code === 'KeyD' && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && !$('mic').hidden && !document.querySelector('dialog[open]')) {
+    event.preventDefault(); if (event.repeat) return;
+    micKey = recording || listening || converting ? null : performance.now(); micToggle();
+  }
+}
+document.addEventListener('keydown', micKeys); document.addEventListener('keyup', micKeys);
+window.addEventListener('pointerup', micUp); window.addEventListener('pointercancel', micUp);
 function micUpdate() {
   $('mic').hidden = !(micPC() || (Speech && window.isSecureContext));
   if (!$('mic').hidden && !micBound) {
-    $('mic').addEventListener('click', () => {
-      if (converting) return;
-      if (recording) return micFinish();
-      if (listening) listening.stop(); else return micStart();
+    $('mic').addEventListener('click', () => { if (micHeld) { micHeld = false; return; } return micToggle(); });
+    $('mic').addEventListener('pointerdown', event => {
+      if (event.button || micHold || recording || listening || converting) return;
+      const hold = micHold = {on:false, timer:setTimeout(() => { if (micHold === hold) { hold.on = true; micStart(); } }, 200)};
     });
+    $('mic').addEventListener('contextmenu', event => event.preventDefault());
     micBound = true;
   }
 }
 function micShow(on) {
   const mic = $('mic'), label = converting ? '글로 바꾸는 중' : on ? '듣는 중 — 누르면 멈춘다' : '음성 입력';
   mic.classList.toggle('busy', !!converting); mic.setAttribute('aria-busy', converting ? 'true' : 'false');
-  mic.classList.toggle('on', on); mic.setAttribute('aria-pressed', on ? 'true' : 'false'); mic.setAttribute('aria-label', label); mic.title = label;
+  mic.classList.toggle('on', on); mic.setAttribute('aria-pressed', on ? 'true' : 'false'); mic.setAttribute('aria-label', label);
+  mic.title = converting || on ? label : '음성 입력 — 짧게 누르면 켜고 끈다 · 길게 누르면 누르는 동안 듣는다(Ctrl+D)';
   micStatus(); micMeterFrame(); updateClock(); updateComposer();
 }
 function micCancel() {                                   // 명시적으로 녹음을 버리거나 브라우저 듣기를 끊는다
@@ -1881,7 +1964,7 @@ function micForget(capture) {
 }
 window.addEventListener('pagehide', micCancel);
 function micRelease(capture) {
-  clearTimeout(capture.timer); if (capture.warm) clearTimeout(capture.warm);
+  clearTimeout(capture.timer); if (capture.warm) clearTimeout(capture.warm); if (capture.quiet) clearTimeout(capture.quiet);
   micReleaseRecorder(capture);
   if (capture.analyser) { capture.analyser.disconnect(); capture.analyser = null; }
   if (!(recording || listening) || recording === capture || listening === capture) { if (meterFrame !== null) cancelAnimationFrame(meterFrame); meterFrame = null; }
@@ -1896,8 +1979,32 @@ function micReleaseRecorder(capture) {
   recorder.ondataavailable = recorder.onstop = recorder.onerror = null;
   if (recorder.state !== 'inactive') { try { recorder.stop(); } catch (_) {} }
 }
+// 15초 동안 말이 없으면 스스로 멈춘다(받아 적은 글은 남는다 — Claude Code 와 같게). 소리 크기와 새로 받아쓴 글을 함께 본다.
+function micQuiet(capture) {
+  if (recording !== capture) return;
+  const now = performance.now();
+  if (capture.analyser) { capture.analyser.getByteTimeDomainData(capture.levels); if (capture.levels.some(level => Math.abs(level - 128) > 3)) capture.heardAt = now; }
+  else capture.heardAt = now;                               // 소리를 재지 못하면 한도까지 듣는다
+  if (now - capture.heardAt >= 15000) { micFinish(true); return message('15초 동안 말이 없어 받아쓰기를 멈췄다 — 받아 적은 글은 그대로다'); }
+  capture.quiet = setTimeout(() => micQuiet(capture), 500);
+}
+// 받아쓰는 동안 사람이 글을 치면: 받아쓴 자리 뒤에 친 글은 지키고 받아쓰기를 멈춘다 · 받아쓴 글 자체를 고쳤으면 화면의 글을 그대로 두고 그만둔다.
+function micTyped(event) {
+  if (!event.isTrusted) return;
+  const capture = recording || converting;
+  if (listening) return micCancel();
+  if (!capture || !capture.sid) return;                     // WAV 길은 마지막 글을 그때의 글 뒤에 붙인다
+  const value = $('text').value;
+  if (selected !== capture.session || !value.startsWith(capture.head)) return micCancel();
+  capture.after = value.slice(capture.head.length); capture.typed = true;
+  if (recording) micFinish(true);
+}
+$('text').addEventListener('input', micTyped);
 async function micRecord(warming) {
-  const capture = {session:selected, before:$('text').value, chunks:[], frames:0, at:0, next:0, modelWarming:true}; recording = capture;
+  const box = $('text'), from = box.selectionStart ?? box.value.length, to = Math.max(from, box.selectionEnd ?? from);
+  // 받아쓴 글은 커서 자리에 들어간다(고른 글이 있으면 그 자리를 바꾼다)
+  const capture = {session:selected, before:box.value.slice(0, from), after:box.value.slice(to), chunks:[], frames:0, at:0, next:0, modelWarming:true}; recording = capture;
+  capture.head = capture.before;
   capture.modelWarm = Promise.resolve(warming).finally(() => { capture.modelWarming = false; });
   try {
     capture.stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true}});
@@ -1957,7 +2064,11 @@ async function micRecord(warming) {
       warm();
     }
     micShow(true); message('');
-    capture.timer = setTimeout(() => { if (recording === capture) return micFinish(); }, 180000);
+    capture.timer = setTimeout(() => {
+      if (recording !== capture) return;
+      const done = micFinish(true); message('받아쓰기 한도 3분에 닿아 멈췄다 — 받아 적은 글은 그대로다'); return done;
+    }, 180000);
+    capture.heardAt = capture.started; micQuiet(capture);
   } catch (_) {
     micRelease(capture);
     if (recording !== capture) return;
@@ -1990,11 +2101,15 @@ function micAppend(before, heard) {
   return before.trimEnd() ? before.trimEnd() + ' ' + heard : heard;
 }
 function micDraw(capture, heard, final = false) {
-  const value = heard ? micAppend(capture.before, heard) : capture.before;
+  const head = heard ? micAppend(capture.before, heard) : capture.before;
+  const value = head + (heard && capture.after && !/^\s/.test(capture.after) ? ' ' : '') + capture.after;
   if (selected !== capture.session) { if (final) drafts.set(capture.session, value); return; }
   if (!final && recording !== capture) return;
-  const text = $('text'); text.value = value; grow(); text.setSelectionRange(value.length, value.length);
-  if (final) { text.dispatchEvent(new Event('input')); text.focus(); }
+  // 커서는 받아쓴 글 끝에 둔다 — 그 뒤에 사람이 치던 중이면 치던 자리(끝에서 센 자리)를 지킨다
+  const text = $('text'), tail = capture.typed ? text.value.length - (text.selectionEnd ?? text.value.length) : null;
+  capture.head = head; text.value = value; grow();
+  const at = tail === null ? head.length : Math.max(head.length, value.length - tail); text.setSelectionRange(at, at); sendOrStop();
+  if (final) { capture.drawn = true; text.dispatchEvent(new Event('input')); text.focus(); }
 }
 function micSend(capture, final = false) {
   if (capture.request) return capture.request;
@@ -2010,7 +2125,11 @@ function micSend(capture, final = false) {
       capture.at += blob.size; capture.next += chunks.length;
       if (capture.cancelled) return;
       if (reply.lost) capture.broken = true;
-      else if (reply.ok && !final) micDraw(capture, (reply.text || '').trim());
+      else if (reply.ok && !final) {
+        const heard = (reply.text || '').trim();
+        if (heard !== capture.heard) { capture.heard = heard; capture.heardAt = performance.now(); }      // 새 글이 왔다 — 말하는 중이다
+        micDraw(capture, heard);
+      }
       return reply;
     } catch (_) { capture.broken = true; }
     finally {
@@ -2025,7 +2144,9 @@ async function micFinish(quiet = false) {
   recording = null; clearTimeout(capture.timer);
   if (capture.started === undefined || (performance.now() - capture.started) / 1000 < .3) {
     micForget(capture); micRelease(capture); micShow(false); $('text').focus();
-    if (!quiet) message('소리가 너무 짧다'); return;
+    if (capture.send && $('text').value.trim()) $('composer').requestSubmit();
+    else if (!quiet) message('소리가 너무 짧다');
+    return;
   }
   converting = capture; if (capture.sid) capture.finalizing = true;      // 누른 순간부터 「글로 바꾸는 중」
   micShow(false); $('text').focus();
@@ -2072,8 +2193,13 @@ async function micFinish(quiet = false) {
         const text = $('text'); text.value = micAppend(text.value, heard); grow(); text.dispatchEvent(new Event('input')); text.focus();
       }
     } else if (selected === capture.session) message('알아들은 말이 없다');
+    if (selected === capture.session) capture.drawn = true;
   } catch (error) { if (!capture.cancelled && selected === capture.session) message(error.message); }
-  finally { micRelease(capture); capture.chunks = []; if (converting === capture) converting = null; micShow(!!recording || !!listening); }
+  finally {
+    micRelease(capture); capture.chunks = []; if (converting === capture) converting = null; micShow(!!recording || !!listening);
+    // 듣는 중에 Enter 를 눌렀으면 마지막 글이 들어온 지금 보낸다(못 받아썼으면 보내지 않는다)
+    if (capture.send && capture.drawn && !capture.cancelled && selected === capture.session && $('text').value.trim()) $('composer').requestSubmit();
+  }
 }
 function micStart() {
   const text = $('text');

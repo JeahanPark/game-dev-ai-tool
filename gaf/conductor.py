@@ -369,6 +369,7 @@ class _Worker:
     turn_task: asyncio.Task | None = None
     current: Letter | None = None
     acked: str | None = None
+    feeding: str | None = None                          # 지금 도는 턴에 넣는 중인 글 번호(_feed) — 그 사이에는 거두지 않는다(unsend)
     memo_sent: int = 0
     task_id: str | None = None
     task_title: str = ""
@@ -1203,6 +1204,28 @@ class Conductor:
             mine.sent_to.add(name)
         self._enqueue(w, letter)
         return {"ok": True, "letter": letter.id, "state": state}
+
+    async def unsend(self, role, at, text) -> dict:
+        """사람이 보내 놓고 세션이 아직 읽지 않은 글 하나를 거둔다(화면의 「기다리는 내 글」 ✕ — Claude Code 와 같게 · 11-24).
+
+        at · text 는 상태의 waiting 이 준 것(보낸 때 · 글의 앞 200자)이고, 돌려주는 text 는 글 전체다(화면이 입력칸에 되돌린다).
+        줄에 있는 동안만 된다 — 도는 턴에 넣는 중이거나(_feed) 이미 읽은 글은 거두지 않는다. 대화 기록(chat)의 줄은 그대로 남는다.
+        """
+        name = str(role or "").strip()
+        w = self._workers.get(name)
+        if w is None:
+            return {"ok": False, "error": f"없는 역할이다: {name}"}
+        assert self.post is not None
+        for letter in w.queue:
+            if (letter.sender == HUMAN and letter.human and letter.kind in ("user", "note") and letter.id != w.feeding
+                    and letter.id not in self._quiet_letters and self._iso(letter.sent_at) == at and letter.body[:200] == text):
+                w.queue.remove(letter)
+                self.post.fail(letter.id, "사람이 거뒀다")
+                self._letter_chat.pop(letter.id, None)
+                self.store.emit("post.unsent", role=w.name, data={"id": letter.id})
+                self._touch()
+                return {"ok": True, "text": letter.body}
+        return {"ok": False, "error": "이미 읽기 시작한 글이다 — 거둘 수 없다"}
 
     async def tell(self, role, text, *, sender: str | None = None) -> dict:
         """send() 의 옛 이름 — 사람의 `python -m gaf tell` 과 총괄의 `gaf tell` 이 쓴다."""
@@ -3446,6 +3469,7 @@ class Conductor:
                 continue                      # 양보한 사이에 줄에서 치워졌다(멈춤) — 치운 글을 넣지 않는다
             if w.join_tried.get(letter.id, 0) >= JOIN_TRIES:
                 return                        # 다음 턴으로 미룬 글이다 — 뒤에 온 글을 먼저 넣으면 차례가 뒤집힌다
+            w.feeding = letter.id             # 넣는 동안은 사람이 거두지 못한다(unsend)
             try:
                 await asyncio.wait_for(session.send(self._letter_text(letter), [self._abs(path) for path in letter.images]),
                                        JOIN_TIMEOUT)
@@ -3459,6 +3483,8 @@ class Conductor:
                     self.store.emit("error", role=w.name, task=w.task_id,
                                     message=f"글 {letter.id}을 도는 턴에 넣지 못했다: {type(exc).__name__}: {exc}")
                 return                        # 차례를 지킨다 — 뒤의 글을 먼저 넣지 않는다
+            finally:
+                w.feeding = None
             if letter not in w.queue:         # 넣는 사이에 줄에서 치워졌다(멈춤) — 기록은 치운 쪽이 했다
                 continue
             w.queue.remove(letter)

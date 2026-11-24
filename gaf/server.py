@@ -75,6 +75,8 @@ ROUTES = {
     "/api/projects": "GET POST",
     # 역할별 대화(받은 글 · 한 말 · 도구 · 턴의 끝)를 이어 받는다 · 사람이 역할에게 글을 보낸다(화면의 입력칸 · 원격 기기도 쓴다).
     "/api/talk": "GET", "/api/send": "POST",
+    # 사람이 보내 놓고 세션이 아직 읽지 않은 글을 거둔다(화면의 「기다리는 내 글」 ✕ · 1.10.0).
+    "/api/unsend": "POST",
     # 작업 폴더에서 바뀐 파일 목록과 파일 하나의 차이(gaf/changes.py — git 을 읽기만 부른다 · 화면의 「바뀐 코드」).
     "/api/changes": "GET", "/api/change": "GET",
 }
@@ -997,6 +999,8 @@ class Server:
             if result.get("ok") is False and str(result.get("error") or "").startswith("없는 역할"):
                 raise RequestError(404, str(result["error"]))
             return result
+        if path == "/api/unsend":
+            return await c.unsend(_text(data, "role"), _text(data, "at"), _text(data, "text"))
         if path == "/api/pair/start":
             started = self.remote.start_pairing()
             if started is None:
