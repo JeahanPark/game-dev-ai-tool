@@ -130,11 +130,13 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .menu-item{border:0;background:none;text-align:left;padding:8px 12px;border-radius:6px}.menu-item.danger{color:#FF9A9E}
 .menu-item small{display:block;color:var(--muted);font-size:calc(12px*var(--u))}
 .menu-item.on::before{content:'✓ '}
-.menu-list{display:grid;max-height:min(46dvh,340px);overflow-y:auto}
+.menu-list{max-height:min(46dvh,340px);overflow-y:auto}
+.menu-list .menu-item{display:block;width:100%}
 .menu-head{margin:0;padding:6px 12px 2px;font-size:calc(12px*var(--u));color:var(--muted)}
 .menu-row{display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 6px}
 .menu-chip{border-radius:999px;padding:2px 10px;min-height:calc(30px*var(--u));font-size:calc(13px*var(--u))}
 .menu-chip.on{background:var(--text);border-color:var(--text);color:#111}
+.model-slot{flex:1 1 0;min-width:0;display:flex}
 .model-pill{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 10px;min-height:calc(30px*var(--u));font-size:calc(12px*var(--u));color:var(--muted);background:none}
 .model-pill::after{content:'▾';flex:none}
 .model-pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -202,7 +204,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div class="dock"><div class="column">
 <section id="decisions" hidden aria-label="내가 정할 것"><div id="decision-list"></div></section>
 <div id="live" class="live" hidden><span class="live-dots" aria-hidden="true"><i>•</i><i>•</i><i>•</i></span><span id="live-text"></span></div>
-<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><button id="model-edit" type="button" class="model-pill" aria-haspopup="menu" aria-expanded="false" aria-label="모델 · 세기 바꾸기" hidden><span id="model"></span></button><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button></div></form>
+<form id="composer" class="composer"><label id="text-label" for="text" class="sr">총괄에게</label><textarea id="text" rows="1" placeholder="맡길 일이나 보탤 말을 적는다"></textarea><div id="attachments"></div><input id="image-files" type="file" accept="image/*" multiple hidden><div class="composer-row"><button id="image-add" type="button" class="icon-button" aria-label="그림 넣기" data-icon="image"></button><span class="model-slot"><button id="model-edit" type="button" class="model-pill" aria-haspopup="menu" aria-expanded="false" aria-label="모델 · 세기 바꾸기" hidden><span id="model"></span></button></span><div class="mic-control"><span id="mic-status" class="live" hidden><span id="mic-meter" aria-hidden="true"></span><span id="mic-dots" class="live-dots" aria-hidden="true" hidden><i>•</i><i>•</i><i>•</i></span><span id="mic-text"></span></span><button id="mic" type="button" class="icon-button" aria-label="음성 입력" aria-pressed="false" data-icon="mic" hidden></button></div><button id="stop" type="button" class="round stop" aria-label="멈춤" data-icon="stop" hidden></button><button id="send" type="submit" class="round send" aria-label="보내기" data-icon="up"></button></div></form>
 <p id="message" class="message" role="status"></p>
 </div></div>
 </section>
@@ -856,7 +858,8 @@ function updateComposer() {
   $('text').readOnly = sending; $('text').disabled = off; $('send').disabled = sending || off;
   $('image-add').hidden = !lead; $('image-add').disabled = sending; $('image-files').disabled = sending || !lead; $('attachments').hidden = !lead;
   $('attachments').querySelectorAll('button').forEach(b => { b.disabled = sending; });
-  $('model').textContent = role ? [role.engine, role.model, role.effort].filter(Boolean).join(' · ') : ''; $('model-edit').hidden = !role;
+  // 폰 폭에서는 엔진 이름을 뺀다(모델 이름에 드러난다) — 모델 줄 · 마이크 · 보내기가 한 줄에 들어오게(1.11.2)
+  $('model').textContent = role ? [phone.matches && role.model ? '' : role.engine, role.model, role.effort].filter(Boolean).join(' · ') : ''; $('model-edit').hidden = !role;
   sendOrStop();
 }
 // 보내기와 멈춤은 한 자리의 단추다(Claude Code 와 같게 · 11-24): 일하는 중이고 보낼 것이 없으면 멈춤, 아니면 보내기.
@@ -1596,7 +1599,7 @@ $('side-open').addEventListener('click', () => { if (phone.matches) show('list')
 $('side-close').addEventListener('click', () => show('chat'));
 $('panel-open').addEventListener('click', () => { if (phone.matches) show('panel'); else { app.dataset.panel = app.dataset.panel === 'off' ? '' : 'off'; refreshDetail(); refreshChanges(); updateJobs(); } });
 $('panel-close').addEventListener('click', () => { if (phone.matches) show('chat'); else { app.dataset.panel = 'off'; updateJobs(); } });
-phone.addEventListener('change', () => { closeMenu(); refreshDetail(); refreshChanges(); if (state) updateJobs(); });
+phone.addEventListener('change', () => { closeMenu(); refreshDetail(); refreshChanges(); if (state) { updateJobs(); updateComposer(); } });
 // 배경 일의 출력 대화상자(패널 묶음에는 함수만 둔다 — 듣는 것은 여기서 건다)
 $('job-reload').addEventListener('click', readJob);
 $('job-output').addEventListener('close', () => { if (!$('job-output').open) { outputJob = null; outputVersion++; } });
