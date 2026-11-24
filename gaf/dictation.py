@@ -290,8 +290,12 @@ def worker_main(stdin, stdout, *, load=None, device=None, decode=None) -> int:
 
 
 class Dictation:
-    def __init__(self, *, command=None, idle=IDLE_SECONDS, clock=monotonic):
+    def __init__(self, *, command=None, idle=IDLE_SECONDS, clock=monotonic, env_key="", cloud=None, words=None):
         self.command = command if command is not None else [sys.executable, "-X", "utf8", "-m", "gaf.dictation", "worker"]
+        # GPT 로 받아쓰기(1.9.0 · gaf/cloudvoice.py): 키가 있으면 마칠 때의 글을 GPT 로 받아쓰고, 없거나 안 되면 이 PC 의 것으로.
+        self.env_key = env_key                    # 지휘자를 켤 때의 환경변수 값(환경을 정리하기 전에 읽은 것)
+        self._cloud = cloud                       # 시험이 가짜 손을 준다
+        self.words = words if words is not None else (lambda: ())      # 힌트 낱말(프로젝트 · 역할 이름)을 주는 손
         self._lock = asyncio.Lock()
         self._process = None
         self._id = 0
@@ -331,8 +335,30 @@ class Dictation:
             if version == self._idle_version:
                 await self._stop()
 
-    def ready(self):
+    def local_ready(self):
+        """이 PC 의 음성 인식(꾸러미 + 모델)이 준비됐나."""
         return ready()
+
+    def cloud_key(self) -> str:
+        from . import cloudvoice
+
+        return cloudvoice.read_key(self.env_key)
+
+    def ready(self):
+        return self.local_ready() or bool(self.cloud_key())
+
+    async def _gpt(self, audio: bytes, language: str):
+        """키가 있으면 GPT 로 받아쓴다 → (글, "") · 안 되면 (None, 까닭) · 키가 없으면 (None, "")."""
+        key = self.cloud_key()
+        if not key:
+            return None, ""
+        from . import cloudvoice
+
+        try:
+            return await asyncio.to_thread(self._cloud or cloudvoice.transcribe, audio, key=key,
+                                           language=_language(language), words=list(self.words())), ""
+        except cloudvoice.CloudError as error:
+            return None, str(error)
 
     async def _exchange(self, request):
         if self._process is None or self._process.returncode is not None:
@@ -363,12 +389,20 @@ class Dictation:
         seconds, error = check_audio(wav)
         if error:
             return {"ok": False, "error": error}
+        text, note = await self._gpt(wav, language)
+        if text is not None:
+            return {"ok": True, "text": text, "seconds": seconds, "engine": "gpt"}
+        if note and not self.local_ready():
+            return {"ok": False, "error": note}          # GPT 가 안 됐고 이 PC 의 음성 인식도 없다
         duration = seconds if sniff(wav) == "wav" else MAX_SECONDS
-        return await self._request({"audio": base64.b64encode(wav).decode("ascii"), "language": _language(language)}, duration)
+        reply = await self._request({"audio": base64.b64encode(wav).decode("ascii"), "language": _language(language)}, duration)
+        return {**reply, "note": note} if note and reply.get("ok") else reply
 
     async def warm(self) -> dict:
         """녹음하는 동안 일꾼과 모델을 준비한다. 미설치는 조용히 돌려준다."""
-        if not self.ready():
+        if not self.local_ready():
+            if self.cloud_key():
+                return {"ok": True, "warm": True, "device": "gpt"}          # 데울 것이 없다 — 마칠 때 GPT 로 받아쓴다
             return {"ok": False, "error": "이 PC에 음성 인식이 깔려 있지 않다"}
         return await self._request({"warm": True})
 
@@ -403,7 +437,7 @@ class Dictation:
                     if len(self._streams) >= STREAM_LIMIT:
                         oldest = min(self._streams, key=lambda key: self._streams[key]["touched"])
                         self._streams.pop(oldest)
-                    state = self._streams[sid] = dict(audio=bytearray(), until=0, committed="", touched=now)
+                    state = self._streams[sid] = dict(audio=bytearray(), until=0, committed="", touched=now, seconds=0)
                 audio = state["audio"]
                 if at > len(audio):
                     return lost("덩이 사이가 비었다")
@@ -414,10 +448,23 @@ class Dictation:
                     return lost("소리가 너무 크다 — 10MB까지 받는다")
                 audio.extend(chunk[overlap:])
                 state["touched"] = self.clock()
+                # 키만 있고 이 PC 의 음성 인식은 없다 — 미리 보기 없이 마칠 때 GPT 로 받아쓴다(키가 없으면 전과 같이 일꾼에게 간다).
+                gpt_only = bool(self.cloud_key()) and not self.local_ready()
+                note = ""
+                if final:
+                    # 마칠 때의 글은 녹음 전체를 GPT 로 다시 받아쓴 것이다(키가 있을 때) — 말하는 동안의 미리 보기는 이 PC 가 한다.
+                    whole, note = await self._gpt(bytes(audio), language)
+                    if whole is not None:
+                        return {"ok": True, "text": whole, "seconds": state["seconds"], "final": True, "engine": "gpt"}
+                    if gpt_only:
+                        return {"ok": False, "error": note or "GPT 로 받아쓰지 못했다"}
+                elif gpt_only:
+                    return {"ok": True, "text": "", "seconds": 0, "final": False}
                 reply = await self._request_locked({"audio": base64.b64encode(audio).decode("ascii"),
                     "offset": state["until"], "partial": not final, "language": _language(language)}, MAX_SECONDS)
                 if not reply["ok"]:
                     return reply
+                state["seconds"] = reply["seconds"]
                 text = " ".join(part.strip() for part in (state["committed"], reply["text"]) if part.strip())
                 if not final and reply["seconds"] - state["until"] > STREAM_WINDOW_SECONDS:
                     # 마지막 구간은 끝 낱말을 다시 고칠 수 있게 늘 남긴다.
@@ -427,7 +474,8 @@ class Dictation:
                         if end > state["until"]:
                             state["committed"] = " ".join(part.strip() for part in (state["committed"], words) if part.strip())
                             state["until"] = end
-                return {"ok": True, "text": text, "seconds": reply["seconds"], "final": final}
+                done = {"ok": True, "text": text, "seconds": reply["seconds"], "final": final}
+                return {**done, "note": note} if note else done
             finally:
                 if final:
                     self._streams.pop(sid, None)

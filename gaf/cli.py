@@ -15,10 +15,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__, desktop, doctor, firstrun, hooks, launch, library, projects, remote, remote_ops, tailnet
+from . import __version__, cloudvoice, desktop, doctor, firstrun, hooks, launch, library, projects, remote, remote_ops, tailnet
 from .remote_ops import fixed_port as _fixed_port
 from .app import build, install_commands, pid_alive, read_server
 from .config import load_config
+from .dictation import Dictation
 from .envclean import clean_env
 from .paths import Paths, _atomic_json, _atomic_text, _read_json, file_lock, find_root, run_dir
 from .roles import create_role, has_roles
@@ -467,10 +468,13 @@ async def _serve_locked(paths, port, starting):
         print("이미 떠 있다: " + str(record.get("url") or f"pid {record.get('pid')} · 포트 {record.get('port')}"))
         return 1
     app = build(paths.root)
+    # GPT 받아쓰기의 키(1.9.0): 아래의 환경 정리는 이름에 KEY 가 든 변수를 지운다 — 그 앞에서 읽어 받아쓰기에만 쓴다(세션에는 넘기지 않는다).
+    voice_key = os.environ.get(cloudvoice.ENV, "")
     clean_env(pass_env=app.config.claude["pass_env"])
     # 포트: 명령의 --port → gaf.json 의 server.port → 이 PC에 정해 둔 포트(원격으로 여는 프로젝트) → 빈 번호
     server = Server(app, port=(app.config.server["port"] or projects.port_of(paths.root)) if port is None else port,
-                    public_port=projects.public_port_of(paths.root) if projects.serve_public(paths.root) else 0)
+                    public_port=projects.public_port_of(paths.root) if projects.serve_public(paths.root) else 0,
+                    dictation=Dictation(env_key=voice_key, words=lambda: [app.config.project, *app.conductor.roles]))
     if not (paths.role_dir(app.config.lead_role) / "역할.md").is_file() and not has_roles(paths):
         # 총괄 없이 다른 역할만 둔 프로젝트는 그대로 돈다(일은 밖에서 `gaf assign` 으로 맡긴다) — 역할이 하나도 없을 때만 알린다
         print("먼저 python -m gaf init", file=sys.stderr, flush=True)

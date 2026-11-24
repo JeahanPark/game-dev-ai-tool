@@ -18,7 +18,7 @@ from pathlib import Path, PureWindowsPath
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, changes, desktop, launch, library, newproject, pickfolder, projects, remote_ops, tailnet
+from . import __version__, changes, cloudvoice, desktop, launch, library, newproject, pickfolder, projects, remote_ops, tailnet
 from .app import read_server
 from .dictation import Dictation, WAV_MAX_BYTES, STREAM_ID
 from .paths import Paths
@@ -62,6 +62,8 @@ ROUTES = {
     "/api/chat": "GET", "/api/models": "GET", "/api/inbox": "GET", "/api/role": "GET POST", "/api/task": "GET", "/api/file": "GET",
     "/api/say": "POST", "/api/decide": "POST", "/api/stop": "POST", "/api/assign": "POST", "/api/custom": "POST",
     "/api/notices": "POST", "/api/shutdown": "POST", "/api/dictate": "POST",
+    # GPT 받아쓰기의 API 키를 넣고 지운다(gaf/cloudvoice.py · 1.9.0) — PC에서만 · 키 값은 답 · 기록에 싣지 않는다.
+    "/api/voice": "POST",
     # 총괄 명령(`gaf team` · `gaf assign` …). 세션은 접근 값 대신 자기 표(X-GAF-Session)로 부른다.
     "/api/tool": "POST",
     # 문: 엔진의 PreToolUse 훅(gaf/hook.py)이 「이 도구를 써도 되나」를 묻는다. 세션의 표로만 부른다.
@@ -78,7 +80,7 @@ ROUTES = {
 }
 # 사설망 앞단을 거쳐 온 요청(원격)이 쓰지 못하는 길 — 세션 길 · 끄기 · 기기 관리는 PC에서만 한다.
 LOCAL_ONLY = frozenset({"/api/tool", "/api/gate", "/api/shutdown", "/api/pair/start", "/api/devices",
-                        "/api/remote", "/api/remote/qr"})
+                        "/api/remote", "/api/remote/qr", "/api/voice"})
 # 등록하지 않은 기기에도 여는 길 — 화면 한 장과 앱 파일, 등록.
 REMOTE_OPEN = frozenset({("GET", "/"), ("GET", "/favicon.ico"), ("POST", "/api/pair")}
                         | {("GET", path) for path in OPEN_ASSETS})
@@ -138,6 +140,7 @@ class Server:
         self.dictation = dictation if dictation is not None else Dictation()
         self._voice_available = None
         self._voice_checked_at = 0
+        self._voice_gpt = None                       # GPT 받아쓰기의 키가 어디서 왔나(쥐고 있는 값 — 상태를 줄 때마다 파일을 읽지 않는다)
         self._remote_stamp = ()
         self._remote_cached = {}
         self.url = ""
@@ -755,7 +758,14 @@ class Server:
         if refresh or self._voice_available is None or (not self._voice_available and now - self._voice_checked_at >= 60):
             self._voice_available = self.dictation.ready()
             self._voice_checked_at = now
+            self._voice_source(refresh=True)         # 받아 적을 때 · 준비를 다시 볼 때 키 파일도 같이 본다
         return self._voice_available
+
+    def _voice_source(self, *, refresh=False) -> str:
+        """GPT 받아쓰기의 키가 어디서 왔나(「화면」 · 「환경변수」 · 빈 글). 화면이 자주 부르는 `/api/state` 에서 파일을 읽지 않게 쥐고 있다."""
+        if refresh or self._voice_gpt is None:
+            self._voice_gpt = cloudvoice.key_source(getattr(self.dictation, "env_key", ""))
+        return self._voice_gpt
 
     async def _dictate(self, data):
         try:
@@ -779,8 +789,9 @@ class Server:
                     raise RequestError(400, "소리 덩이의 base64를 읽지 못했다") from None
                 if not self._voice_ready(refresh=True):
                     raise RequestError(503, "이 PC에 음성 인식이 깔려 있지 않다 — python -m gaf voice setup")
-                return await self.dictation.stream(sid, at, chunk, final=data.get("final", False),
-                                                  cancel=data.get("cancel", False), language=data.get("language", "ko"))
+                return self._voice_note(await self.dictation.stream(
+                    sid, at, chunk, final=data.get("final", False), cancel=data.get("cancel", False),
+                    language=data.get("language", "ko")))
             try:
                 encoded = data.get("audio")
                 if not isinstance(encoded, str):
@@ -792,12 +803,41 @@ class Server:
                 raise RequestError(413, "소리가 너무 크다 — 10MB까지 받는다")
             if not self._voice_ready(refresh=True):
                 raise RequestError(503, "이 PC에 음성 인식이 깔려 있지 않다 — python -m gaf voice setup")
-            result = await self.dictation.transcribe(audio, data.get("language", "ko"))
+            result = self._voice_note(await self.dictation.transcribe(audio, data.get("language", "ko")))
             if not result.get("ok"):
                 raise RequestError(400, str(result.get("error") or "소리를 글로 바꾸지 못했다"))
             return {"ok": True, "text": result["text"]}
         finally:
             self._voice_ready(refresh=True)
+
+    def _voice_note(self, result):
+        """GPT 로 받아쓰지 못해 이 PC 의 것으로 받아쓴 답이면 까닭을 화면 알림으로 올린다(답에서는 뺀다)."""
+        if isinstance(result, dict) and result.get("note"):
+            result = dict(result)
+            self.app.conductor._notice("voice-gpt", "warn",
+                                       "GPT 받아쓰기가 안 돼 이 PC 의 음성 인식으로 받아썼다: " + str(result.pop("note")))
+        return result
+
+    async def _voice_key(self, data) -> dict:
+        """GPT 받아쓰기의 API 키를 넣거나 지운다(PC에서만 — LOCAL_ONLY). 키 값은 답 · 이벤트 · 기록에 싣지 않는다.
+
+        넣을 때는 저장하기 전에 맞는 키인지 한 번 본다(모델 목록 읽기 — 돈이 들지 않는다): 틀린 키를 넣고 모르는 일이 없게."""
+        if set(data) == {"clear"} and data["clear"] is True:
+            await asyncio.to_thread(cloudvoice.clear_key)
+        elif set(data) == {"key"} and isinstance(data["key"], str):
+            key = data["key"].strip()
+            try:
+                if len(key) < 20 or re.search(r"\s", key):
+                    raise cloudvoice.CloudError("API 키의 꼴이 아니다 — OpenAI 에서 만든 키를 그대로 붙여 넣는다")
+                await asyncio.to_thread(cloudvoice.check_key, key)
+                await asyncio.to_thread(cloudvoice.save_key, key)
+            except cloudvoice.CloudError as error:
+                raise RequestError(400, str(error)) from None
+            self.app.conductor._clear_notice("voice-gpt")
+        else:
+            raise RequestError(400, "key(글) 또는 clear: true 가운데 하나를 적는다")
+        self._voice_ready(refresh=True)
+        return {"ok": True, "gpt": self._voice_source()}
 
     async def _remote_control(self, data):
         action = data.get("action")
@@ -836,9 +876,13 @@ class Server:
             # version: 화면이 「서버가 새 판으로 다시 켜졌다」를 알아채 저를 새로 연다(11-19 폰이 업데이트 전 화면을 그대로 돌림).
             return {**c.snapshot(), "notices": c.notice_views(remote=peer["remote"]),
                     "seq": store.seq, "remote": self._remote_view(peer),
-                    "voice": "pc" if self._voice_ready() else "browser", "version": __version__}
+                    "voice": "pc" if self._voice_ready() else "browser", "version": __version__,
+                    # GPT 받아쓰기의 키가 어디서 왔나(「화면」 · 「환경변수」 · 없으면 빈 글 — 값은 싣지 않는다 · 1.9.0)
+                    "voice_gpt": self._voice_source()}
         if path == "/api/dictate":
             return await self._dictate(data)
+        if path == "/api/voice":
+            return await self._voice_key(data)
         if path == "/api/remote":
             return await self._remote_control(data)
         if path == "/api/remote/qr":
