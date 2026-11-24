@@ -126,10 +126,11 @@ video,audio{display:block;width:100%;max-width:100%;min-width:0}video{max-height
 .dl{display:grid;grid-template-columns:calc(42px*var(--u)) calc(14px*var(--u)) minmax(0,1fr);white-space:pre-wrap;overflow-wrap:anywhere}
 .dl .no{color:var(--off);text-align:right;padding-right:8px;user-select:none}.dl .sign{user-select:none}
 .dl.add{background:#14291E}.dl.del{background:#2E1A1C}.dl.hunk{color:var(--muted);background:#1A1C1E}
-.menu{position:fixed;z-index:20;width:calc(240px*var(--u));max-width:calc(100vw - 16px);background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:4px;display:grid;box-shadow:0 8px 24px #0008}
+.menu{position:fixed;z-index:20;width:calc(240px*var(--u));max-width:calc(100vw - 16px);background:var(--card);border:1px solid var(--edge);border-radius:10px;padding:4px;display:grid;box-shadow:0 8px 24px #0008;max-height:calc(100dvh - 16px);overflow-y:auto}
 .menu-item{border:0;background:none;text-align:left;padding:8px 12px;border-radius:6px}.menu-item.danger{color:#FF9A9E}
 .menu-item small{display:block;color:var(--muted);font-size:calc(12px*var(--u))}
 .menu-item.on::before{content:'✓ '}
+.menu-list{display:grid;max-height:min(46dvh,340px);overflow-y:auto}
 .menu-head{margin:0;padding:6px 12px 2px;font-size:calc(12px*var(--u));color:var(--muted)}
 .menu-row{display:flex;flex-wrap:wrap;gap:4px;padding:4px 8px 6px}
 .menu-chip{border-radius:999px;padding:2px 10px;min-height:calc(30px*var(--u));font-size:calc(13px*var(--u))}
@@ -338,7 +339,8 @@ async function modelMenu() {
   const pick = (text, on, action, cls) => {
     const b = button(text, action, cls + (on ? ' on' : '')); b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', on ? 'true' : 'false'); return b;
   };
-  items.append(node('p', role.name + ' — 모델', 'menu-head'));
+  const list = node('div', null, 'menu-list');             // 모델이 많으면 이 칸만 내려 본다 — 세기 줄은 늘 보인다(1.11.1)
+  items.append(node('p', role.name + ' — 모델', 'menu-head'), list);
   for (const m of set.models.some(m => m.id === set.model) ? set.models : [...set.models, {id:set.model, name:set.model || '엔진 기본'}]) {
     const on = m.id === set.model;
     const b = pick(m.name, on, () => {
@@ -347,7 +349,7 @@ async function modelMenu() {
       b.armed = true; b.textContent = '한 번 더 누르면 ' + m.name + ' 로 바꾼다 — 이 역할은 새 대화로 시작한다';
     }, 'menu-item');
     if (m.note) b.append(node('small', m.note));
-    items.append(b);
+    list.append(b);
   }
   items.append(node('p', '세기 — 다음 답부터 쓴다', 'menu-head'));
   const row = node('div', null, 'menu-row');
