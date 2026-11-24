@@ -137,9 +137,13 @@ def _parser():
     opener = command("open", "지휘자를 (꺼져 있으면) 배경에서 띄우고 화면을 연다 — 폴더를 안 주면 마지막에 연 프로젝트")
     opener.add_argument("--no-browser", action="store_true", help="화면을 열지 않고 주소만 찍는다")
     opener.add_argument("--app", action="store_true", help="주소창 없는 프로그램 창으로 연다")
+    opener.add_argument("--last", action="store_true",
+                        help="지금 폴더를 보지 않고 마지막에 쓰던 프로젝트를 연다(공용 아이콘이 쓴다)")
     shortcut = command("shortcut", "프로그램을 켜는 바로 가기를 만든다(사람만 쓴다)")
     shortcut.add_argument("--dir", type=Path, metavar="폴더", help="바로 가기를 둘 곳(기본: 바탕화면)")
     shortcut.add_argument("--name", metavar="이름", help="바로 가기 이름")
+    shortcut.add_argument("--last", action="store_true",
+                          help="프로젝트를 정하지 않는 공용 아이콘 — 마지막에 쓰던 프로젝트를 연다")
     setup = command("setup", "처음 한 번 하는 준비(사람만 쓴다)")
     setup.add_argument("--no-shortcut", action="store_true", help="바로 가기를 만들지 않는다")
     setup.add_argument("--no-open", action="store_true", help="준비 뒤 프로그램을 켜지 않는다")
@@ -364,8 +368,9 @@ def _reviews(paths, args):
     return 0
 
 
-def _shortcut(paths, link_dir=None, name=None):
-    if not paths.config.is_file():
+def _shortcut(paths, link_dir=None, name=None, *, last=False):
+    """바탕화면 바로 가기. last = 공용 아이콘(1.8.0) — 프로젝트를 정하지 않고 마지막에 쓰던 것을 연다(프로젝트는 프로그램 안에서 고른다)."""
+    if not last and not paths.config.is_file():
         print("먼저 python -m gaf init --root <프로젝트 폴더> 로 준비한다", file=sys.stderr)
         return 1
     # AppData(run_dir) 가 아니라 사람마다의 gaf 폴더(~/.gaf)에 둔다 — Microsoft Store 의 파이썬은 AppData 에 쓴 파일을 제 꾸러미 안
@@ -378,11 +383,11 @@ def _shortcut(paths, link_dir=None, name=None):
     if not icon.is_file() or icon.read_bytes() != data:
         icon.write_bytes(data)
     pythonw = Path(sys.executable).with_name("pythonw.exe")
-    ok, detail = desktop.make_shortcut(link_dir, name if name is not None else desktop.shortcut_name(paths.root),
+    label = desktop.APP_NAME if last else desktop.shortcut_name(paths.root)
+    ok, detail = desktop.make_shortcut(link_dir, name if name is not None else label,
         target=str(pythonw) if pythonw.is_file() else sys.executable,
-        arguments=f'-X utf8 -m gaf open --app --root "{paths.root.resolve()}"',
-        workdir=str(Path(__file__).resolve().parent.parent), icon=str(icon),
-        description=f"Game Dev AI Tool — {paths.root.name}")
+        arguments="-X utf8 -m gaf open --app --last" if last else f'-X utf8 -m gaf open --app --root "{paths.root.resolve()}"',
+        workdir=str(Path(__file__).resolve().parent.parent), icon=str(icon), description=label)
     print("바로 가기를 만들었다: " + detail if ok else detail, file=sys.stdout if ok else sys.stderr)
     return 0 if ok else 1
 
@@ -1090,6 +1095,19 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, urllib.error.URLError):
         print("오류: 지휘자에 연결하지 못했다 — 잠시 뒤 다시 한다", file=sys.stderr)
         return 1
+    if args.command == "open" and args.last:
+        # 공용 아이콘(1.8.0): 작업 폴더(프로그램을 깐 폴더)에 gaf.json 이 있어도 보지 않고 마지막에 쓰던 프로젝트를 연다.
+        if args.root is not None:
+            print("오류: --last 는 --root 와 같이 쓰지 않는다", file=sys.stderr)
+            return 1
+        recent = projects.last()
+        if recent is None:
+            if sys.stderr is None:          # 창 없는 실행(pythonw)에는 글을 찍을 곳이 없다
+                desktop.message_box(desktop.APP_NAME, "열 프로젝트가 없다 — 설치.cmd 를 다시 더블클릭해 게임 폴더를 고른다")
+            else:
+                print("열 프로젝트가 없다 — python -m gaf setup 으로 게임 폴더를 고른다", file=sys.stderr)
+            return 1
+        args.root = recent
     paths = Paths(args.root.resolve() if args.root is not None else find_root())
     if args.command == "open" and args.root is None and not paths.config.is_file():
         recent = projects.last()                  # 프로젝트 밖에서 쳤다 — 마지막에 연 프로젝트를 연다
@@ -1123,7 +1141,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "open":
             return launch.open_project(paths.root, browser=None if args.no_browser else launch.webbrowser.open, app=args.app)
         if args.command == "shortcut":
-            return _shortcut(paths, args.dir, args.name)
+            return _shortcut(paths, args.dir, args.name, last=args.last)
         if args.command == "doctor":
             return doctor.main(paths if paths.config.is_file() else None)
         if args.command == "hooks":

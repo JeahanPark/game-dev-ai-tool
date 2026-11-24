@@ -5098,6 +5098,10 @@ class Conductor:
         self.store.emit("account", engine=engine, account=account)
         self._touch()
 
+    def account_plan(self, engine: str) -> str | None:
+        """그 엔진의 구독 이름(아직 읽지 못했으면 None) — 화면에서 더하는 새 프로젝트의 총괄 기본 모델을 고른다(1.8.0)."""
+        return self._accounts.get(engine, {}).get("plan")
+
     async def _read_session_account(self, engine: str, session: EngineSession) -> None:
         if engine not in ("claude", "codex"):
             return

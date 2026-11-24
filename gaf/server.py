@@ -18,7 +18,7 @@ from pathlib import Path, PureWindowsPath
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, changes, desktop, launch, library, projects, remote_ops, tailnet
+from . import __version__, changes, desktop, launch, library, newproject, pickfolder, projects, remote_ops, tailnet
 from .app import read_server
 from .dictation import Dictation, WAV_MAX_BYTES, STREAM_ID
 from .paths import Paths
@@ -69,7 +69,7 @@ ROUTES = {
     # 원격 접속(gaf/remote.py): 기기 등록은 원격 화면에서 · 등록 시작과 기기 관리는 PC에서만 한다.
     "/api/pair": "POST", "/api/pair/start": "POST", "/api/devices": "GET POST",
     "/api/remote": "POST", "/api/remote/qr": "GET",
-    # 이 PC에서 연 프로젝트 목록(gaf/projects.py) — 꺼진 프로젝트를 켜는 것(POST)은 PC에서만 한다.
+    # 이 PC에서 연 프로젝트 목록(gaf/projects.py) — 켜기 · 더하기 · 폴더 고르기 · 목록에서 빼기(POST)는 PC에서만 한다.
     "/api/projects": "GET POST",
     # 역할별 대화(받은 글 · 한 말 · 도구 · 턴의 끝)를 이어 받는다 · 사람이 역할에게 글을 보낸다(화면의 입력칸 · 원격 기기도 쓴다).
     "/api/talk": "GET", "/api/send": "POST",
@@ -148,6 +148,8 @@ class Server:
         self._public_clients: set[asyncio.Task] = set()
         self._public_writers: set[asyncio.StreamWriter] = set()
         self._remote_lock = asyncio.Lock()
+        self._project_lock = asyncio.Lock()          # 프로젝트 더하기는 한 번에 하나(첫 파일 만들기가 겹치지 않게)
+        self._picking = False                        # 폴더 선택 창이 떠 있다(한 번에 하나)
         self._clients: set[asyncio.Task] = set()
         self._refusals: set[asyncio.Task] = set()
         self._writers: set[asyncio.StreamWriter] = set()
@@ -458,6 +460,7 @@ class Server:
 
         try:
             method, path, query, headers, data, peer = await self._request(reader, public=public, response=response)
+            peer["gone"] = reader.at_eof          # 답을 기다리는 동안 화면 쪽이 연결을 닫았나(폴더 선택 창이 본다)
             if path.startswith("/api/") and not getattr(self.app.conductor, "started", True):
                 # serve 는 포트를 먼저 잡고(세션에 줄 GAF_PORT) 지휘자를 켠다 — 그 사이에 온 요청
                 raise RequestError(503, "지휘자가 뜨는 중이거나 꺼지는 중이다 — 잠시 뒤 다시 한다")
@@ -589,8 +592,11 @@ class Server:
         await self._send(writer, 200, {"ok": True}, extra={"Set-Cookie": self.remote.cookie(value, secure=secure)})
 
     async def _projects(self, method, data, peer) -> dict:
-        """이 PC에서 연 프로젝트들의 지금 모습(파일만 읽는다) · POST {"open": 폴더} 는 꺼진 프로젝트의 지휘자를 띄운다.
+        """이 PC에서 연 프로젝트들의 지금 모습(파일만 읽는다) · POST 는 PC에서만 받는 일 넷 가운데 하나다.
 
+        {"open": 폴더} 꺼진 프로젝트의 지휘자를 띄운다 · {"add": {"folder"} 또는 {"parent", "name"}} 프로젝트를 더해 켠다(1.8.0) ·
+        {"pick": true} 이 PC 에 폴더 선택 창을 띄워 고른 경로를 준다 · {"forget": 폴더} 꺼진 프로젝트를 목록에서 뺀다(폴더는 그대로) ·
+        {"seen": true} 지금 이 프로젝트의 PC 화면을 보고 있다(「마지막에 쓰던 프로젝트」가 된다).
         PC 화면에는 떠 있는 프로젝트의 주소(접근 값이 들어 있다)를 같이 준다. 원격 기기에는 주소 · 폴더를 주지 않고
         원격으로 여는 포트만 준다 — 화면이 제 주소의 이름에 그 포트를 붙여 간다.
         """
@@ -599,15 +605,24 @@ class Server:
         if method == "POST":
             if peer["remote"]:
                 raise RequestError(403, "이 일은 PC에서 한다")
+            asked = [name for name in ("open", "add", "pick", "forget", "seen") if name in data]
+            if len(asked) != 1:
+                raise RequestError(400, "open · add · pick · forget · seen 가운데 하나를 적는다")
+            if asked == ["seen"]:
+                if data["seen"] is not True:
+                    raise RequestError(400, "seen은 true여야 한다")
+                await asyncio.to_thread(self._viewed)
+                return {"ok": True}
+            if asked == ["pick"]:
+                return await self._pick_folder(data, peer.get("gone"))
+            if asked == ["add"]:
+                return await self._add_project(data["add"], [entry["root"] for entry in entries] + [str(here)])
+            if asked == ["forget"]:
+                return await self._forget_project(_text(data, "forget"), entries)
             wanted = _text(data, "open")
             if not wanted:
                 raise RequestError(400, "open에 켤 프로젝트의 폴더를 적는다")
-            try:
-                known = {os.path.normcase(str(Path(entry["root"]).resolve())) for entry in entries}
-                listed = os.path.normcase(str(Path(wanted).resolve())) in known
-            except (OSError, ValueError):
-                listed = False
-            if not listed:
+            if self._listed(wanted, entries) is None:
                 raise RequestError(404, "목록에 없는 프로젝트다")
             record, error, _ = await asyncio.to_thread(launch.start, Path(wanted))
             if record is None:
@@ -632,7 +647,85 @@ class Server:
                         view["url"] = record["url"]
             out.append(view)
         out.sort(key=lambda view: not view["current"])          # 지금 프로젝트를 맨 앞에(나머지는 최근에 연 차례)
-        return {"projects": out, "can_open": not peer["remote"]}
+        listed = {"projects": out, "can_open": not peer["remote"]}
+        if not peer["remote"]:
+            listed["base"] = newproject.base_folder(here)       # 새 폴더를 만들 기본 위치(이 PC 의 경로 — 원격에는 주지 않는다)
+        return listed
+
+    @staticmethod
+    def _listed(folder: str, entries: list[dict]) -> dict | None:
+        """목록에 적어 둔 프로젝트 가운데 그 폴더인 것(없으면 None)."""
+        try:
+            wanted = os.path.normcase(str(Path(folder).resolve()))
+            return next((entry for entry in entries
+                         if os.path.normcase(str(Path(entry["root"]).resolve())) == wanted), None)
+        except (OSError, ValueError):
+            return None
+
+    async def _pick_folder(self, data, gone=None) -> dict:
+        """이 PC 에 폴더 선택 창을 띄우고 고른 경로를 기다린다 — 이 지휘자에서는 한 번에 하나다.
+
+        기다리던 화면이 닫히거나(연결이 끊긴다) 지휘자가 꺼지면 창도 닫는다 — 남겨 두면 그동안 「폴더 고르기」가 막힌다."""
+        if data["pick"] is not True:
+            raise RequestError(400, "pick은 true여야 한다")
+        start = _text(data, "start")
+        if self._picking:
+            raise RequestError(409, "폴더 선택 창이 이미 떠 있다 — PC 화면에서 고르거나 닫는다")
+        self._picking = True
+        picking = asyncio.ensure_future(pickfolder.choose(start))
+        try:
+            while not (await asyncio.wait({picking}, timeout=.5))[0]:
+                if gone is not None and gone():
+                    raise RequestError(400, "화면이 닫혀 폴더 선택 창을 닫았다")
+            return {"ok": True, "folder": picking.result()}
+        except pickfolder.PickError as error:
+            raise RequestError(400, str(error)) from None
+        finally:
+            if not picking.done():
+                picking.cancel()                         # 창 도우미를 끈다(gaf.pickfolder.choose 가 그만둘 때 끈다)
+                with contextlib.suppress(BaseException):
+                    await picking
+            self._picking = False
+
+    async def _add_project(self, spec, listed=None) -> dict:
+        if not isinstance(spec, dict):
+            raise RequestError(400, "add는 folder 또는 parent · name을 적은 객체여야 한다")
+        folder, parent, name = (_text(spec, key) for key in ("folder", "parent", "name"))
+        async with self._project_lock:
+            try:
+                root, made = await asyncio.to_thread(newproject.add, folder, parent, name, listed=listed,
+                                                     plan=self.app.conductor.account_plan("claude"))
+            except newproject.ProjectError as error:
+                raise RequestError(400, str(error)) from None
+            record, error, _ = await asyncio.to_thread(launch.start, root)
+        if record is None:
+            raise RequestError(400, "프로젝트는 목록에 더했지만 켜지 못했다 — 목록의 「켜기」로 다시 한다: " + error)
+        return {"ok": True, "url": record["url"], "made": made}
+
+    async def _forget_project(self, folder: str, entries: list[dict]) -> dict:
+        entry = self._listed(folder, entries) if folder else None
+        if entry is None:
+            raise RequestError(404, "목록에 없는 프로젝트다")
+        if os.path.normcase(str(Path(entry["root"]).resolve())) == os.path.normcase(str(self.app.paths.root.resolve())):
+            raise RequestError(400, "지금 연 프로젝트는 빼지 않는다")
+        if (await asyncio.to_thread(projects.overview, entry))["running"]:
+            raise RequestError(400, "떠 있는 프로젝트는 빼지 않는다 — 먼저 그 프로젝트의 설정에서 프로그램을 끈다")
+        if entry["serve"]:
+            # 이 줄이 원격으로 여는 포트와 「우리가 건 넘김」을 기억한다 — 빼면 `gaf remote off` 가 그 넘김을 끄지 못해 남는다.
+            raise RequestError(400, "원격 접속을 켜 둔 프로젝트다 — 먼저 끈다: python -m gaf remote off --root \"" + entry["root"] + "\"")
+        await asyncio.to_thread(projects.forget, entry["root"])
+        return {"ok": True}
+
+    def _viewed(self) -> None:
+        """PC 화면에서 보고 있는 프로젝트를 「마지막에 쓰던 프로젝트」로 적는다 — 공용 아이콘(`gaf open --last`)이 이것을 연다(1.8.0).
+
+        화면이 보일 때 · 앞으로 나올 때 접근 값으로 알린다({"seen": true}). 화면 한 장을 받는 것(`GET /`)으로는 세지 않는다 — 접근 값
+        없이도 받을 수 있고, 뒤에 있는 창이 새 판을 알아채 스스로 새로 열릴 때도 받는다. 이미 목록 맨 앞이면 다시 적지 않는다."""
+        root = self.app.paths.root
+        with contextlib.suppress(OSError, ValueError):
+            rows = projects.entries()
+            if not rows or os.path.normcase(str(Path(rows[0]["root"]).resolve())) != os.path.normcase(str(root.resolve())):
+                projects.remember(root, self.app.config.project)
 
     def _remote_view(self, peer) -> dict:
         if peer["remote"]:

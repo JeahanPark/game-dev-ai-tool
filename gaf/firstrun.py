@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import desktop, doctor, launch, paths as user_paths
+from . import desktop, doctor, launch, newproject, projects, paths as user_paths
 from .paths import Paths, _atomic_json, _read_json
 
 
@@ -157,19 +157,21 @@ def setup(root=None, *, no_shortcut=False, no_open=False, codex=False, ask=False
     obsidian_result = _obsidian(run=run, which=which) if choices["obsidian"] else "건너뜀(선택하지 않음)"
 
     print("[5/7] 게임 프로젝트 폴더를 고른다")
-    folder = root if root is not None else (choose_folder() if choose_folder is not None else choose_project(input=input))
+    folder = root
+    if folder is None:
+        # 다시 돌린 설치(새 판으로 올리기)는 쓰던 프로젝트를 그대로 연다 — 올릴 때마다 폴더 선택 창이 떴다(1.8.0 에서 고침).
+        folder = projects.last()
+        if folder is not None:
+            print(f"쓰던 프로젝트를 그대로 연다: {folder} — 다른 게임 폴더는 프로그램 안의 「프로젝트 → 새 프로젝트」에서 더한다")
+        else:
+            folder = choose_folder() if choose_folder is not None else choose_project(input=input)
     if folder is None or not str(folder).strip():
         print("폴더를 고르지 않았다")
         return 1
     project = Path(folder).expanduser().resolve()
-    if project == Path(project.anchor):
-        print("드라이브 뿌리는 프로젝트로 쓰지 않는다 — 게임 폴더를 고른다")
-        return 1
-    if project == Path.home().resolve():
-        print("사용자 집 폴더는 프로젝트로 쓰지 않는다 — 그 안의 게임 폴더를 고른다")
-        return 1
-    if not project.is_dir():
-        print("없는 폴더이거나 폴더가 아니다 — 이미 있는 게임 폴더를 고른다")
+    problem = newproject.place_error(project)          # 화면의 「새 프로젝트」와 같은 검사(겹침 · 프로그램을 깐 폴더까지)
+    if problem:
+        print(problem)
         return 1
 
     print("[6/7] 프로젝트의 첫 파일을 준비한다")
@@ -190,6 +192,15 @@ def setup(root=None, *, no_shortcut=False, no_open=False, codex=False, ask=False
             print("프로젝트의 첫 파일을 만들지 못했다")
             return 1
 
+    # 공용 아이콘은 「마지막에 쓰던 프로젝트」를 연다 — 켜지 못했거나 켜기를 건너뛰어도 이 프로젝트가 그것이게 여기서 적는다.
+    try:
+        from .config import load_config
+
+        title = load_config(paths).project
+    except (OSError, ValueError):
+        title = project.name
+    projects.remember(project, title)
+
     if choices["obsidian"]:
         print(f"옵시디언에서 『폴더를 보관함으로 열기』로 {project / 'wiki'} 를 연다")
 
@@ -200,14 +211,15 @@ def setup(root=None, *, no_shortcut=False, no_open=False, codex=False, ask=False
         if shortcut is None:
             from .cli import _shortcut
 
-            shortcut = lambda root: _shortcut(Paths(root))
+            # 아이콘은 하나다(1.8.0) — 프로젝트는 프로그램 안에서 고르고 더한다
+            shortcut = lambda root: _shortcut(Paths(root), last=True)
         if shortcut(project) != 0:
             return 1
     if no_open:
         print("프로그램 켜기는 건너뛴다")
     elif (opener or launch.open_project)(project, app=True) != 0:
         return 1
-    name = desktop.shortcut_name(project)
+    name = desktop.APP_NAME
     print(f"\n준비 요약\nClaude ✓ · GPT {gpt_result} · 옵시디언 {obsidian_result}\n"
           f"프로젝트 폴더: {project}\n바탕화면 아이콘: " + ("건너뜀" if no_shortcut else name))
     next_time = (f"다음부터는 바탕화면의 「{name}」 을 더블클릭한다." if not no_shortcut else

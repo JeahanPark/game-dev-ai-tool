@@ -38,7 +38,7 @@ pre{font-size:calc(13px*var(--u));white-space:pre-wrap;overflow-wrap:anywhere;ba
 /* 세 칸: 세션 목록 · 대화 · 패널 */
 .app{display:grid;grid-template-columns:var(--side-w,280px) minmax(0,1fr) var(--panel-w,380px);height:100dvh}
 .side{background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;min-height:0}
-.side-top{display:flex;align-items:center;gap:8px;padding:14px 10px 6px 18px;min-height:calc(52px*var(--u))}.side-top h1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-top{display:flex;align-items:center;gap:8px;padding:14px 10px 6px 18px;min-height:calc(52px*var(--u))}.side-top h1{flex:1;min-width:0;display:flex}#project-switch{display:flex;align-items:center;gap:6px;min-width:0;border-color:transparent;background:none;padding:6px 8px;margin-left:-8px;font-weight:inherit;text-align:left}#project-switch::after{content:'▾';flex:none;color:var(--muted)}#project{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-nav{padding:2px 8px 10px;border-bottom:1px solid var(--line);display:grid;gap:2px}
 .nav-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border-color:transparent;background:none;padding:6px 10px;color:var(--soft)}
 .side-list{flex:1;overflow:auto;padding:8px 8px 12px;min-height:0}
@@ -137,7 +137,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 #settings h3{margin-top:18px}#settings-remote .message,#project-list a{overflow-wrap:anywhere}#project-list a{min-height:44px;display:inline-flex;align-items:center;padding:0 8px}
 #image-view{width:auto}#large-image{max-width:85vw;max-height:75dvh;display:block;object-fit:contain}
 .form{display:grid;gap:8px}.form label{font-size:calc(13px*var(--u));color:var(--muted);margin-top:6px}.form input,.form textarea,.form select{width:100%}.form textarea{resize:vertical;min-height:72px}
-.form summary{cursor:pointer;color:var(--muted);padding:8px 0}.form details>div{display:grid;gap:8px}.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+.form .kind{display:flex;align-items:center;color:var(--text)}.form input[type=radio]{width:auto;min-height:0;margin:0 8px 0 0}.pick-row{display:flex;gap:8px}.pick-row input{flex:1;min-width:0}#project-new-open,#project-new-form{margin-top:14px}.form summary{cursor:pointer;color:var(--muted);padding:8px 0}.form details>div{display:grid;gap:8px}.actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 #no-key{padding:24px}.pair{max-width:calc(420px*var(--u));margin:12vh auto;padding:24px;display:grid;gap:14px}.pair h1{font-size:calc(18px*var(--u))}.pair input{font-size:calc(22px*var(--u));letter-spacing:2px;text-align:center}
 .phone-only{display:none}
 /* 넓은 화면: 글자 · 단추 · 줄 길이를 키운다(--u). 2560 폭 100% 배율 모니터에서 14px 글자가 작았다(11-15) */
@@ -177,7 +177,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <form id="pair" class="pair" hidden><h1>기기 등록</h1><p>PC 화면의 「설정 → 원격 기기 → 기기 등록」에 나온 코드를 넣는다. 처음 한 번만 한다.</p><label for="pair-code">등록 코드</label><input id="pair-code" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="1234-5678"><button class="primary" type="submit">등록</button><p id="pair-message" class="message" role="status"></p></form>
 <div id="app" class="app" data-view="chat" hidden>
 <nav id="side" class="side" aria-label="세션 목록">
-<div class="side-top"><h1 id="project">Game Dev AI Tool</h1><button id="side-close" type="button" class="icon-button phone-only" aria-label="목록 닫기" data-icon="close"></button></div>
+<div class="side-top"><h1><button id="project-switch" type="button" title="프로젝트 바꾸기 · 새 프로젝트"><span id="project">Game Dev AI Tool</span></button></h1><button id="side-close" type="button" class="icon-button phone-only" aria-label="목록 닫기" data-icon="close"></button></div>
 <div class="side-nav"><button id="role-new-open" type="button" class="nav-row" data-icon="plus">새 역할</button><button id="projects-open" type="button" class="nav-row" data-icon="folder">프로젝트</button></div>
 <div id="roles" class="side-list"></div>
 <p id="side-message" class="message" role="status"></p>
@@ -207,7 +207,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 <div id="menu" class="menu" hidden><div id="menu-items" role="menu" aria-label="세션 메뉴"></div></div>
 <dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
 <dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
-<dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div></div></dialog>
+<dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div><button id="project-new-open" type="button" hidden>+ 새 프로젝트</button><form id="project-new-form" class="form" hidden><h3>새 프로젝트</h3><label class="kind"><input id="project-new-existing" type="radio" name="project-new-kind" checked>이미 있는 게임 폴더</label><label class="kind"><input id="project-new-fresh" type="radio" name="project-new-kind">새 폴더로 시작</label><div id="project-new-name-box" class="form" hidden><label for="project-new-name">프로젝트 이름(폴더 이름이 된다)</label><input id="project-new-name" maxlength="60" autocomplete="off" placeholder="예: 내게임"></div><label id="project-new-path-label" for="project-new-path">게임 폴더</label><div class="pick-row"><input id="project-new-path" autocomplete="off" placeholder="예: C:\Games\내게임"><button id="project-new-pick" type="button">폴더 고르기</button></div><p class="muted">이 폴더 안에서 AI 가 파일을 읽고 고친다. gaf.json · team · wiki 가 생긴다(이미 준비된 폴더면 그대로 연다).</p><p id="project-new-error" class="message" role="status"></p><div class="actions"><button id="project-new-save" type="submit" class="primary">만들기</button></div></form></div></dialog>
 <dialog id="model-set" aria-labelledby="model-set-title"><div class="dialog-head"><h2 id="model-set-title">모델 · 세기</h2><button type="button" data-close="model-set">닫기</button></div><form id="model-set-form" class="dialog-body form"><label for="model-set-model">모델</label><select id="model-set-model"></select><input id="model-set-text" maxlength="80" autocomplete="off" aria-label="모델 이름" placeholder="모델 이름(비우면 엔진 기본)" hidden><p id="model-set-note" class="muted"></p><label for="model-set-effort">세기(effort)</label><select id="model-set-effort"></select><p class="muted">다음 답부터 쓴다. 모델을 바꾸면 그 역할은 새 대화로 시작한다.</p><p id="model-set-error" class="message" role="status"></p><button id="model-set-save" type="submit" class="primary">저장</button></form></dialog><dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
 <dialog id="image-view" aria-label="그림 크게 보기"><div class="dialog-head"><span>그림</span><button type="button" data-close="image-view">닫기</button></div><div class="dialog-body"><img id="large-image" alt="크게 보는 그림"></div></dialog>
 <dialog id="role-info" aria-labelledby="role-info-title"><div class="dialog-head"><h2 id="role-info-title">역할 정보</h2><button type="button" data-close="role-info">닫기</button></div><div class="dialog-body"><p id="role-info-error" class="message" role="status"></p><div id="role-info-body" class="role-info"></div></div></dialog>
@@ -1117,31 +1117,76 @@ function remoteResultNodes() {
   if (warn) { const line = node('p', '경고: ' + warn, 'message'); line.setAttribute('role', 'alert'); rows.push(line); }
   return rows;
 }
+// ── 프로젝트 고르기 · 만들기 ─────────────────────────────────────────────
+// 왼쪽 위의 프로젝트 이름과 옆줄의 「프로젝트」가 같은 창을 연다. 켜기 · 빼기 · 새 프로젝트는 PC 화면에서만 된다(서버도 막는다).
 const projectWords = {missing:'폴더 없음',off:'꺼짐',needs_input:'내 확인 필요',blocked:'막힘',working:'일하는 중',idle:'쉼'};
-async function showProjects() {
+let projectBase = '';
+async function showProjects(note) {
   const box = $('project-list'), version = ++projectsVersion; box.replaceChildren(); $('projects-error').textContent = '';
   try {
     const listed = await api('/api/projects');
     if (version !== projectsVersion) return;
+    projectBase = listed.base || ''; $('project-new-open').hidden = !listed.can_open || !$('project-new-form').hidden;
     for (const project of listed.projects) {
       const row = settingsRow(project.name, (projectWords[project.status] || project.status) + (project.decisions ? ' · 정할 것 ' + project.decisions : '') + (project.working ? ' · 일하는 역할 ' + project.working : ''));
       // 떠 있는 다른 프로젝트: PC에서는 서버가 준 주소로, 원격에서는 지금 주소의 이름에 그 프로젝트의 원격 포트를 붙여 간다.
       const address = project.url || (project.serve && project.running ? (project.https ? 'https:' : 'http:') + '//' + location.hostname + ':' + project.serve + '/' : '');
       if (project.current) row.append(node('small', '지금 여기'));
       else if (address) { const link = node('a', '열기'); link.href = address; row.append(link); }
-      else if (listed.can_open && project.status === 'off') {
-        const start = button('켜기', async () => {
-          start.disabled = true; $('projects-error').textContent = '';
-          try { location.href = (await api('/api/projects', {open:project.root})).url; }
-          catch (error) { $('projects-error').textContent = error.message; start.disabled = false; }
+      else if (listed.can_open && !project.running) {
+        if (project.status === 'off') {
+          const start = button('켜기', async () => {
+            start.disabled = true; $('projects-error').textContent = '';
+            try { location.href = (await api('/api/projects', {open:project.root})).url; }
+            catch (error) { $('projects-error').textContent = error.message; start.disabled = false; }
+          });
+          row.append(start);
+        }
+        // 목록에서만 뺀다 — 폴더 · 파일은 그대로다(「새 프로젝트 → 이미 있는 게임 폴더」로 다시 더할 수 있다).
+        const drop = button('목록에서 빼기', async () => {
+          drop.disabled = true; $('projects-error').textContent = '';
+          try { await api('/api/projects', {forget:project.root}); await showProjects('목록에서 뺐다 — 폴더와 파일은 그대로다'); }
+          catch (error) { $('projects-error').textContent = error.message; drop.disabled = false; }
         });
-        row.append(start);
+        row.append(drop);
       }
       box.append(row);
     }
+    if (note) $('projects-error').textContent = note;
   } catch (error) { $('projects-error').textContent = error.message; }
 }
-$('projects-open').addEventListener('click', () => { $('projects').showModal(); showProjects(); });
+function openProjects() { $('project-new-form').hidden = true; $('project-new-error').textContent = ''; $('projects').showModal(); return showProjects(); }
+$('projects-open').addEventListener('click', openProjects);
+$('project-switch').addEventListener('click', openProjects);
+// 새 프로젝트: 이미 있는 게임 폴더를 고르거나(폴더 선택 창은 PC 에 뜬다) 새 폴더로 시작한다 → 만들면 그 프로젝트의 화면으로 간다.
+function projectKind() {
+  const fresh = $('project-new-fresh').checked;
+  $('project-new-name-box').hidden = !fresh; $('project-new-path-label').textContent = fresh ? '만들 위치' : '게임 폴더';
+  $('project-new-path').value = fresh ? projectBase : ''; $('project-new-error').textContent = '';
+}
+$('project-new-existing').addEventListener('change', projectKind);
+$('project-new-fresh').addEventListener('change', projectKind);
+$('project-new-open').addEventListener('click', () => { $('project-new-open').hidden = true; $('project-new-form').hidden = false; projectKind(); $('project-new-path').focus(); });
+$('project-new-pick').addEventListener('click', async () => {
+  const pick = $('project-new-pick'), status = $('project-new-error');
+  pick.disabled = true; status.textContent = 'PC 화면에 폴더 선택 창을 띄웠다 — 고르면 여기에 들어온다(안 보이면 작업 표시줄을 본다)';
+  try { const got = await api('/api/projects', {pick:true, start:$('project-new-path').value.trim()}); if (got.folder) $('project-new-path').value = got.folder; status.textContent = ''; }
+  catch (error) { status.textContent = error.message; }
+  pick.disabled = false;
+});
+$('project-new-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const fresh = $('project-new-fresh').checked, path = $('project-new-path').value.trim(), name = $('project-new-name').value.trim(), status = $('project-new-error'), save = $('project-new-save');
+  if (fresh && !name) { status.textContent = '프로젝트 이름을 적는다'; return; }
+  if (!path) { status.textContent = fresh ? '만들 위치를 고르거나 적는다' : '게임 폴더를 고르거나 적는다'; return; }
+  save.disabled = true; status.textContent = '만드는 중이다 — 새 프로젝트를 켜고 그 화면으로 간다';
+  try { location.href = (await api('/api/projects', {add: fresh ? {parent:path, name} : {folder:path}})).url; }
+  catch (error) { status.textContent = error.message; save.disabled = false; }
+});
+// 이 PC 의 화면에서 보고 있는 프로젝트가 「마지막에 쓰던 프로젝트」다(아이콘이 그것을 연다) — 열 때와 창이 앞으로 나올 때 알린다.
+function seenHere() { if (key && !document.hidden) api('/api/projects', {seen:true}).catch(() => {}); }
+addEventListener('focus', seenHere); seenHere();
+// ── /프로젝트 고르기 · 만들기
 // 설정을 열 때 상태를 한 번 다시 받는다 — 원격 접속은 터미널(`gaf remote on`)에서 켜고 끄므로 이벤트가 오지 않는다.
 $('settings-open').addEventListener('click', async () => {
   resetSettings(); $('settings').showModal(); settingsSignature = ''; if (state) updateSettings();

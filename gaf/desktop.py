@@ -15,8 +15,11 @@ from pathlib import Path
 BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 
 
+APP_NAME = "Game Dev AI Tool"          # 공용 아이콘의 이름(1.8.0 — 마지막에 쓰던 프로젝트를 연다 · 프로젝트는 프로그램 안에서 고른다)
+
+
 def shortcut_name(root) -> str:
-    return f"Game Dev AI Tool — {Path(root).name}"
+    return f"{APP_NAME} — {Path(root).name}"
 
 
 def app_browsers(env=None, exists=os.path.isfile, which=shutil.which) -> list[str]:
