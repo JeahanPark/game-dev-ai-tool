@@ -252,6 +252,10 @@ def can_write(path, globs, root, *, library_raw=False) -> tuple[bool, str]:
 def _can_write_place(full: str, globs, base: Path, *, library_raw=False) -> tuple[bool, str]:
     if _same_place(full, _canon(user_dir() / "CUSTOM.md", base)):
         return False, "늘 막는 곳이다: Custom · 전체 프로젝트"
+    # 접근 값 폴더는 쓰기 범위가 아무리 넓어도 쓰지 않는다(1.13.0 · 11-25 GPT 검토) — 읽기만 막고 쓰기는 열려 있어, 넓은 절대 글롭
+    # 하나로 등록한 기기 목록 · 훅 믿음 · 프로젝트 밖 쓰기의 승인을 세션이 고칠 수 있었다. 글자로도 파일 번호로도 견준다(_reaches).
+    if _reaches(full, _run_place(), search=False):
+        return False, "늘 막는 곳이다: 접근 값 폴더(등록한 기기 · 믿음 · 승인을 두는 곳 — 사람만 고친다)"
     inside, relative = _under(full, base)
     # 절대 경로 비교에도 정리된 전체 경로를 쓴다.
     absolute = (base / relative).resolve().as_posix() if inside else relative

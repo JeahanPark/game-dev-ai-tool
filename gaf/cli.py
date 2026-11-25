@@ -15,14 +15,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__, cloudvoice, desktop, doctor, firstrun, hooks, launch, library, projects, remote, remote_ops, tailnet
+from . import __version__, cloudvoice, desktop, doctor, firstrun, hooks, launch, library, outside, projects, remote, remote_ops, tailnet
 from .remote_ops import fixed_port as _fixed_port
 from .app import build, install_commands, pid_alive, read_server
 from .config import load_config
 from .dictation import Dictation
 from .envclean import clean_env
 from .paths import Paths, _atomic_json, _atomic_text, _read_json, file_lock, find_root, run_dir
-from .roles import create_role, has_roles
+from .roles import RoleError, _role_folders, create_role, has_roles, load_role
 from .server import IMAGE_LIMIT, IMAGE_TYPES, Server
 
 # 사람이 보는 표의 말(화면의 상태 알약과 같다). 총괄이 읽는 말은 lead_tools.STATUS_WORDS 다 — 더 길게 풀어 쓴 것.
@@ -155,6 +155,10 @@ def _parser():
     voice.add_argument("action", nargs="?", default="status", choices=["status", "setup"])
     work_hooks = command("hooks", "일 앞뒤 명령 · 기본 검사와 믿음을 본다 · trust 는 둘을 함께 믿는다")
     work_hooks.add_argument("action", nargs="?", choices=["trust"], metavar="trust")
+    beyond = command("outside", "역할이 쓰려는 프로젝트 밖 폴더를 본다 · approve 로 이 PC 에서 승인하고 revoke 로 거둔다(사람만 쓴다)")
+    beyond.add_argument("action", nargs="?", choices=["approve", "revoke"], metavar="approve|revoke")
+    beyond.add_argument("folders", nargs="*", metavar="폴더", help="승인하거나 거둘 폴더(절대 경로)")
+    beyond.add_argument("--all", action="store_true", help="approve: 쓰려는 폴더 전부(못 여는 곳은 뺀다) · revoke: 승인한 폴더 전부")
     checks = command("check", "프로젝트 기본 검사를 본다 · 추가하거나 뺀다")
     actions = checks.add_subparsers(dest="action", required=True)
     command("list", "기본 검사와 믿음", actions)
@@ -551,6 +555,77 @@ def _body(value, file):
     if value is None:
         raise InputError("오류: 내용이 없다 — 글을 적거나, `-` 로 표준 입력에서 넘기거나, --file 로 넘긴다")
     return value
+
+
+OUTSIDE_STATES = {"open": "열림", "closed": "닫힘", "refused": "못엶"}
+
+
+def _outside(paths, args):
+    """역할이 쓰려는 프로젝트 밖 폴더를 보이고, 이 PC 에서 승인하거나 거둔다(사람만 — gaf/outside.py · 1.13.0).
+
+    `gaf hooks trust` 와 같은 꼴: 지휘자가 꺼져 있어도 된다(역할 글과 접근 값 폴더의 승인 파일만 다룬다) · 떠 있는 지휘자는 다음 점검 때 알아챈다."""
+    allowed = outside.approved(paths.root)
+    if args.action == "revoke":                      # 거두기는 역할 글을 읽지 않는다 — 상관없는 역할 하나가 깨졌다고 못 거두면 안 된다
+        folders = list(allowed) if args.all else list(args.folders)
+        if not folders and not args.all:
+            print("오류: 거둘 폴더를 적거나 --all 을 준다", file=sys.stderr)
+            return 1
+        try:
+            left = outside.revoke(paths.root, folders)
+        except outside.OutsideError as error:
+            print(f"오류: {error} — 아무것도 거두지 않았다(python -m gaf outside 로 승인 목록을 본다)", file=sys.stderr)
+            return 1
+        print(f"거뒀다 — 폴더 {len(folders)}곳(남은 승인 {len(left)}곳). 떠 있는 지휘자는 다음 점검 때 닫는다(열려 있는 세션에서도 닫는다)")
+        return 0
+    config = load_config(paths)
+    mine = os.path.normcase(str(paths.root.resolve()))
+    others = [row["root"] for row in projects.entries() if os.path.normcase(str(Path(row["root"]).resolve())) != mine]
+    places = outside.Places(paths.root, others)
+    rows: dict[str, dict] = {}
+    for folder in _role_folders(paths):              # 하나씩 읽는다 — 깨진 역할 글은 건너뛰고 알린다
+        try:
+            role = load_role(paths, config, folder.name)
+        except RoleError as error:
+            print(f"알림: 역할 「{folder.name}」의 글을 읽지 못해 건너뛴다: {error}", file=sys.stderr)
+            continue
+        if role.off:
+            continue
+        for pattern in role.write:
+            spot = outside.anchor(pattern, paths.root)
+            if spot is None:
+                continue
+            row = rows.setdefault(spot, {"roles": [], "why": outside.refusal(spot, paths.root, places=places)})
+            if role.name not in row["roles"]:
+                row["roles"].append(role.name)
+    if args.action is None:
+        if not rows:
+            print("프로젝트 밖을 쓰려는 역할이 없다" + (f" · 승인해 둔 폴더 {len(allowed)}곳: {', '.join(allowed)}" if allowed else ""))
+            return 0
+        print("역할이 쓰려는 프로젝트 밖 폴더(실제로 열리는 폴더 — 파일 하나만 적어도 그 윗폴더 전체가 열린다)")
+        shut = 0
+        for folder in sorted(rows):
+            row = rows[folder]
+            state = "refused" if row["why"] else "open" if outside.covered(folder, allowed) else "closed"
+            shut += state == "closed"
+            print(f"  {OUTSIDE_STATES[state]}  {folder}  {', '.join(row['roles'])}" + (f" — {row['why']}" if row["why"] else ""))
+        print(f"이 PC 의 승인: {', '.join(allowed) if allowed else '없음'}")
+        if shut:
+            print(f"닫힌 곳 {shut}곳 — python -m gaf outside approve --all (전부) 이나 python -m gaf outside approve <폴더>… 로 승인한다(이 PC · 이 프로젝트)")
+        return 0
+    folders = [folder for folder in sorted(rows) if not rows[folder]["why"]] if args.all else list(args.folders)
+    if not folders:
+        if args.all:
+            print("승인할 프로젝트 밖 폴더가 없다")
+            return 0
+        print("오류: 승인할 폴더를 적거나 --all 을 준다", file=sys.stderr)
+        return 1
+    try:
+        left = outside.approve(paths.root, folders, others=others)
+    except outside.OutsideError as error:
+        print(f"오류: {error} — 아무것도 승인하지 않았다", file=sys.stderr)
+        return 1
+    print(f"승인했다 — 폴더 {len(folders)}곳(이 PC · 이 프로젝트 · 승인은 모두 {len(left)}곳). 떠 있는 지휘자는 다음 점검 때 알아챈다")
+    return 0
 
 
 def _tool_request(args):
@@ -1153,6 +1228,8 @@ def main(argv: list[str] | None = None) -> int:
             return doctor.main(paths if paths.config.is_file() else None)
         if args.command == "hooks":
             return _hooks(paths, args.action)
+        if args.command == "outside":
+            return _outside(paths, args)
         if args.command == "check":
             return _checks(paths, args)
         if args.command == "review":

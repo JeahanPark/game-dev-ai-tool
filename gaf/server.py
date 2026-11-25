@@ -69,6 +69,8 @@ ROUTES = {
     "/api/chat": "GET", "/api/models": "GET", "/api/inbox": "GET", "/api/role": "GET POST", "/api/task": "GET", "/api/file": "GET",
     "/api/say": "POST", "/api/decide": "POST", "/api/stop": "POST", "/api/assign": "POST", "/api/custom": "POST",
     "/api/notices": "POST", "/api/shutdown": "POST", "/api/dictate": "POST",
+    # 역할이 쓰려는 프로젝트 밖 폴더를 이 PC 에서 승인하거나 거둔다(gaf/outside.py · 1.13.0) — PC에서만 · 무엇이 닫혀 있는지는 상태(`outside`)에 싣는다.
+    "/api/outside": "POST",
     # GPT 받아쓰기의 API 키를 넣고 지운다(gaf/cloudvoice.py · 1.9.0) — PC에서만 · 키 값은 답 · 기록에 싣지 않는다.
     "/api/voice": "POST",
     # 총괄 명령(`gaf team` · `gaf assign` …). 세션은 접근 값 대신 자기 표(X-GAF-Session)로 부른다.
@@ -87,9 +89,10 @@ ROUTES = {
     # 작업 폴더에서 바뀐 파일 목록과 파일 하나의 차이(gaf/changes.py — git 을 읽기만 부른다 · 화면의 「바뀐 코드」).
     "/api/changes": "GET", "/api/change": "GET",
 }
+OUTSIDE_MAX = 64                         # 한 번에 승인 · 거두는 프로젝트 밖 폴더의 수
 # 사설망 앞단을 거쳐 온 요청(원격)이 쓰지 못하는 길 — 세션 길 · 끄기 · 기기 관리는 PC에서만 한다.
 LOCAL_ONLY = frozenset({"/api/tool", "/api/gate", "/api/shutdown", "/api/pair/start", "/api/devices",
-                        "/api/remote", "/api/remote/qr", "/api/voice"})
+                        "/api/remote", "/api/remote/qr", "/api/voice", "/api/outside"})
 # 등록하지 않은 기기에도 여는 길 — 화면 한 장과 앱 파일, 등록.
 REMOTE_OPEN = frozenset({("GET", "/"), ("GET", "/favicon.ico"), ("POST", "/api/pair")}
                         | {("GET", path) for path in OPEN_ASSETS})
@@ -1185,6 +1188,8 @@ class Server:
             return {**c.snapshot(), "notices": c.notice_views(remote=peer["remote"]),
                     "seq": store.seq, "remote": self._remote_view(peer),
                     "voice": "pc" if self._voice_ready() else "browser", "version": __version__,
+                    # 역할이 쓰려는 프로젝트 밖 폴더와 이 PC 의 승인(gaf/outside.py · 1.13.0) — 원격에도 보이고, 바꾸는 것은 PC 에서만
+                    "outside": c.outside_view(),
                     # 공개 문으로 온 화면에는 이 프로젝트의 표를 준다 — 화면이 주소 · 요청에 붙여(p) 이 프로젝트에 머문다(1.12.0)
                     **({"project_id": self.ident} if peer["public"] else {}),
                     # GPT 받아쓰기의 키가 어디서 왔나(「화면」 · 「환경변수」 · 없으면 빈 글 — 값은 싣지 않는다 · 1.9.0)
@@ -1273,6 +1278,8 @@ class Server:
             if action == "model":               # 사람이 화면에서 그 역할의 모델 · 세기를 바꾼다(빈 글 = 엔진 기본 — 11-24)
                 return c.set_role_model(name, _text(data, "model"), _text(data, "effort"))
             raise RequestError(400, "action은 new · off · on · reset · model 중 하나다")
+        if path == "/api/outside":
+            return self._outside(c, data)
         if path == "/api/notices":
             if data.get("clear") is not True:
                 raise RequestError(400, "clear: true를 보낸다")
@@ -1395,6 +1402,27 @@ class Server:
         for path in paths:
             path.unlink(missing_ok=True)
         return result
+
+    @staticmethod
+    def _outside(c, data) -> dict:
+        """프로젝트 밖 쓰기 폴더의 승인 · 거두기(PC 에서만 — LOCAL_ONLY). 못 여는 곳이 하나라도 있으면 아무것도 적지 않는다."""
+        from . import outside
+
+        lists = {}
+        for key in ("approve", "revoke"):
+            value = data.get(key, [])
+            if not isinstance(value, list) or len(value) > OUTSIDE_MAX or not all(isinstance(item, str) and item.strip() for item in value):
+                raise RequestError(400, f"{key}: 폴더 경로 글의 목록이어야 한다({OUTSIDE_MAX}개까지)")
+            lists[key] = value
+        if not lists["approve"] and not lists["revoke"]:
+            raise RequestError(400, "approve 나 revoke 에 폴더를 적는다")
+        try:
+            view = c.outside_change(approve=lists["approve"], revoke=lists["revoke"])
+        except outside.OutsideError as exc:
+            raise RequestError(400, str(exc)) from None
+        except OSError as exc:
+            raise RequestError(500, f"승인을 적지 못했다: {type(exc).__name__}") from None
+        return {"ok": True, "outside": view}
 
     def _file(self, value):
         try:

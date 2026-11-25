@@ -475,6 +475,12 @@ def team_text(conductor, sender: str | None) -> str:
         sandbox = conductor._sandbox_dirs(conductor.roles[view["name"]])
         if sandbox:
             parts.append(f"· 샌드박스 {', '.join(sandbox)}")
+        shut = conductor._outside_closed(view["name"])
+        if shut:                                   # 역할 글에는 있으나 이 PC 에서 승인 전이라 닫힌 곳(1.13.0) — 총괄이 「막힘」의 까닭을 안다
+            parts.append(f"· 닫힌 프로젝트 밖 폴더 {len(shut)}곳(사람이 PC 화면의 설정에서 승인해야 열린다): {', '.join(shut)}")
+        barred = conductor._outside_refused(view["name"])
+        if barred:                                 # 승인으로는 안 열린다 — 역할 글을 고쳐야 한다
+            parts.append(f"· 열 수 없는 프로젝트 밖 폴더 {len(barred)}곳(이 틀이 열지 않는 곳 — 사람이 역할 글의 쓰기 범위를 고쳐야 한다): {', '.join(barred)}")
         lines.append(" ".join(parts))
     if not lines:
         lines.append("(역할이 없다 — `new_role` 도구로 만든다)")
