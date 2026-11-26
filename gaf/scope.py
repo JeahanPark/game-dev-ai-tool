@@ -67,6 +67,17 @@ def _case(text: str) -> str:
     return text.casefold() if os.name == "nt" else text
 
 
+def plain_glob(pattern) -> str:
+    """쓰기 글롭에서 뜻 없는 꼴을 걷는다 — 역슬래시는 `/` 로, 앞의 `./` 는 뗀다(여러 번).
+
+    문 · 쓰기 폴더 계산 · 프로젝트 밖 승인(gaf/outside.py)이 같은 글을 본다: `./C:/자료/**` 를 한쪽은 절대 글롭으로, 다른 쪽은 상대 글롭으로
+    읽으면 승인 없이 열린다(11-26 Opus 검수 — 1.13.0 도 쓰기 폴더 계산만 `./` 를 떼어 그 폴더를 OS 에 열었다)."""
+    text = str(pattern).replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def sandbox_dirs(globs, root) -> list[str] | None:
     """쓰기 글롭에서 OS 에 열 폴더를 고른다(디스크는 보지 않는다).
 
@@ -78,9 +89,7 @@ def sandbox_dirs(globs, root) -> list[str] | None:
     for pattern in globs:
         if not isinstance(pattern, str) or not pattern.strip():
             return None
-        text = pattern.replace("\\", "/")
-        while text.startswith("./"):
-            text = text[2:]
+        text = plain_glob(pattern)
         parts = text.split("/")
         if text.startswith(("//", "~")) or ".." in parts:
             return None
@@ -266,7 +275,7 @@ def _can_write_place(full: str, globs, base: Path, *, library_raw=False) -> tupl
         if glob_match(relative, pattern):
             return False, f"늘 막는 곳이다: {relative}"
     for pattern in globs:
-        pattern = str(pattern).replace("\\", "/")
+        pattern = plain_glob(pattern)                # `./` 는 뜻 없는 앞머리다 — 쓰기 폴더 계산은 떼고 문은 안 떼어 둘이 어긋났다(11-26 GPT 검토)
         is_absolute = Path(pattern).is_absolute()
         if not inside and not is_absolute:
             continue

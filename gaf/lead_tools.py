@@ -478,6 +478,9 @@ def team_text(conductor, sender: str | None) -> str:
         shut = conductor._outside_closed(view["name"])
         if shut:                                   # 역할 글에는 있으나 이 PC 에서 승인 전이라 닫힌 곳(1.13.0) — 총괄이 「막힘」의 까닭을 안다
             parts.append(f"· 닫힌 프로젝트 밖 폴더 {len(shut)}곳(사람이 PC 화면의 설정에서 승인해야 열린다): {', '.join(shut)}")
+        waiting = conductor._names_blocked(view["name"])
+        if waiting:                                # 쓰기 범위의 이름을 이 PC 에서 아직 못 쓴다(1.14.0) — 일을 맡겨도 시작하지 않는 까닭을 총괄이 안다
+            parts.append(f"· 일을 시작하지 않는다: {waiting}")
         barred = conductor._outside_refused(view["name"])
         if barred:                                 # 승인으로는 안 열린다 — 역할 글을 고쳐야 한다
             parts.append(f"· 열 수 없는 프로젝트 밖 폴더 {len(barred)}곳(이 틀이 열지 않는 곳 — 사람이 역할 글의 쓰기 범위를 고쳐야 한다): {', '.join(barred)}")
@@ -796,7 +799,10 @@ def build(conductor, sender: str | None) -> list[ToolDef]:
                          "effort": {"type": "string", "enum": list(dict.fromkeys((*EFFORTS, *CodexEngine.efforts))),
                                     "description": "세기(선택 · ultra 는 GPT 만)"},
                          "write": {"type": "array", "items": {"type": "string"},
-                                   "description": "쓸 수 있는 곳(글롭 · 프로젝트 뿌리 기준 · 예: docs/기획/**)"}},
+                                   "description": "쓸 수 있는 곳(글롭 · 프로젝트 뿌리 기준 · 예: docs/기획/**). 프로젝트 밖은 경로를 적지 않고 "
+                                                  "이름으로 적는다: @이름/하위/**(이름은 gaf.json 의 folders 에 선언한 것 · 그 폴더는 사람이 PC 에서 "
+                                                  "고른다 · 역할 글에는 {\"folder\": \"이름\", \"glob\": \"하위/**\"} 로 적힌다 — 있는 역할 글을 고칠 때는 "
+                                                  "그 꼴로 · 프로젝트 안의 @폴더 는 ./@폴더/** 로 적는다)"}},
                         ["name"]), _safe(new_role)),
         ToolDef("library_list", "서랍 목록에서 필요한 글을 찾는다.",
                 _schema({"kind": {"type": "string", "enum": list(library.KINDS)},

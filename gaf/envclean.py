@@ -10,11 +10,13 @@ import os
 from typing import Iterable, MutableMapping
 
 EXACT = ("CLAUDECODE", "CLAUDE_EFFORT", "CLAUDE_PID", "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "ELECTRON_RUN_AS_NODE",
-         "AI_AGENT", "MCP_CONNECTION_NONBLOCKING", "GIT_ASKPASS")
+         "AI_AGENT", "MCP_CONNECTION_NONBLOCKING", "GIT_ASKPASS",
+         # 다른 지휘자의 세션 안에서 띄우면 그 세션의 「이름 → 이 PC 의 폴더」가 따라 들어온다 — 자식마다 그 역할의 값으로 다시 준다(1.14.0)
+         "GAF_FOLDERS")
 PREFIXES = ("CLAUDE_CODE_", "VSCODE_", "ANTHROPIC_")
 WORDS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "WEBHOOK")
 KEEP = ("CLAUDE_CONFIG_DIR",)
-SESSION_ENV = ("GAF_SESSION", "GAF_ROLE", "GAF_PORT", "GAF_PYTHON", "GAF_HOOK")
+SESSION_ENV = ("GAF_SESSION", "GAF_ROLE", "GAF_PORT", "GAF_PYTHON", "GAF_HOOK", "GAF_FOLDERS")
 
 
 def should_remove(name: str, keep: Iterable[str] = ()) -> bool:

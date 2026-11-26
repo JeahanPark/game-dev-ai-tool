@@ -32,7 +32,7 @@ from . import commits, default_review, hooks, outside
 from . import limits as limits_mod
 from . import roles as roles_mod
 from . import scope
-from .config import (Config, ConfigError, JOB_COMMAND_MAX, load_config, validate_checks, change_check,
+from .config import (Config, ConfigError, JOB_COMMAND_MAX, VersionError, load_config, validate_checks, change_check,
                      validate_reviews, change_review)
 from .engines import base as engine_base
 from .engines.base import EFFORTS, Engine, EngineEvent, EngineSession, NotRunning, SessionSpec, ToolDef
@@ -225,6 +225,16 @@ def is_blocked_answer(text: str) -> bool:
     """마지막 답의 첫 줄이나 끝 줄이 「막힘:」으로 시작하는가."""
     lines = [line for line in str(text or "").splitlines() if line.strip()]
     return bool(lines) and bool(_BLOCKED.match(lines[0]) or _BLOCKED.match(lines[-1]))
+
+
+# 이 상태의 이름 참조가 있는 역할은 일 · 검토를 시작하지 않는다(사람이 풀 때까지). refused · moved 는 짝 폴더 자체를 못 쓰는 것이다 —
+# 그 이름의 경로를 세션 · 스크립트에 주지 않는다(짝 폴더 아래의 한 줄만 닫힌 escaped · barred 는 기다리게 하지 않는다 — 11-26 Opus 검수).
+NAME_WAITS = ("undeclared", "unpaired", "missing", "invalid", "refused", "moved")
+
+
+def _outside_glob(pattern) -> bool:
+    """프로젝트 밖을 가리킬 수 있는 쓰기 글롭인가 — 절대 경로다(이름 참조는 role.refs 에 따로 있다). 문과 같은 글로 본다(`./C:/…` 도 절대다)."""
+    return Path(scope.plain_glob(pattern)).is_absolute()
 
 
 def _file_sig(path: Path) -> tuple[int, int] | None:
@@ -449,6 +459,11 @@ class Conductor:
         self._outside: dict[str, dict] = {}
         self._outside_allowed: list[str] = []
         self._outside_rows: list[dict] = []          # 화면에 줄 표(역할을 읽을 때 한 번 만든다 — 상태 요청은 디스크를 보지 않는다)
+        # 프로젝트 밖 폴더의 이름(1.14.0): 선언(gaf.json 의 folders)은 config.folders · 이름 → 이 PC 의 폴더(짝)는 접근 값 폴더에 있다
+        self._outside_names: list[dict] = []         # 화면에 줄 이름 표(선언한 이름 + 역할이 쓰는 이름 + 남은 짝)
+        self._folders_signature = None               # 선언을 읽은 gaf.json 의 지문 — 바뀌면 선언만 다시 읽는다(_refresh_folders)
+        self._needs_version = ""                     # 이 프로젝트가 이 프로그램보다 높은 판을 바란다는 까닭(있으면 어느 역할도 새 글을 시작하지 않는다)
+        self._issued: set[str] = set()               # 세션을 열며 준 표들 — 닫힌 세션의 문(scope_now)이 빈 범위를 답하게 기억한다
         self._side: set[asyncio.Task] = set()
         self._commit_tasks: set[asyncio.Task] = set()  # 끄기 전에 결과 글까지 기다릴 커밋 · 푸시 작업이다.
         self._ticker: asyncio.Task | None = None
@@ -732,7 +747,11 @@ class Conductor:
         found: dict[str, Role] = {}
         errors: dict[str, str] = {}
         team = self.paths.team
+        self._refresh_folders()
         allowed, others = outside.approved(self.paths.root), self._other_projects()
+        pairs = outside.pairs(self.paths.root)
+        names = (dict(self.config.folders), pairs)    # 이름의 선언과 이 PC 의 짝 — 역할 글의 `@이름/…` 을 푼다
+        stuck_before = {name for name, entry in self._outside.items() if entry.get("blocked")}
         scopes: dict[str, dict] = {}
         shared: dict = {}                             # 못 여는 곳의 기준(outside.Places) — 밖 글롭이 있을 때 한 번만 셈한다
         if team.is_dir():
@@ -741,12 +760,12 @@ class Conductor:
                 if not folder.is_dir() or name.startswith(("_", ".")) or not (folder / "역할.md").is_file():
                     continue
                 try:
-                    found[name] = self._outside_scope(roles_mod.load_role(self.paths, self.config, name), allowed, others, scopes, shared)
+                    found[name] = self._outside_scope(roles_mod.load_role(self.paths, self.config, name), allowed, others, scopes, shared, names)
                 except RoleError as exc:
                     errors[name] = str(exc)
                     if name in self.roles:           # 읽던 역할이 잠깐 깨졌으면 앞의 값을 쓴다(프로젝트 밖 범위는 지금의 승인으로 다시 가린다)
                         worker = self._workers[name]
-                        found[name] = self._outside_scope(self._unscoped(worker.role_file or worker.role), allowed, others, scopes, shared)
+                        found[name] = self._outside_scope(self._unscoped(worker.role_file or worker.role), allowed, others, scopes, shared, names)
         for name, text in errors.items():
             self._notice(f"role:{name}", "warn", f"역할 「{name}」을 읽지 못했다: {text}")
         for name in set(self._role_errors) - set(errors):
@@ -760,7 +779,7 @@ class Conductor:
             self._clear_notice("unused-keys")
         for name, w in self._workers.items():         # 폴더가 사라졌어도 일하는 중이면 끝날 때까지 둔다
             if name not in found and (w.busy or w.queue or w.session is not None or w.runner is not None):
-                found[name] = self._outside_scope(self._unscoped(w.role_file or w.role), allowed, others, scopes, shared)
+                found[name] = self._outside_scope(self._unscoped(w.role_file or w.role), allowed, others, scopes, shared, names)
         self._outside = {name: scopes[name] for name in found}
         self._outside_allowed = allowed
         rows: dict[str, dict] = {}
@@ -768,7 +787,8 @@ class Conductor:
             if found[name].off:
                 continue
             entry = self._outside[name]
-            for folder, shut in [(folder, None) for folder in entry.get("open", ())] + [(row["folder"], row) for row in entry["closed"]]:
+            for folder, shut in ([(folder, None) for folder in entry.get("open", ())]
+                                 + [(row["folder"], row) for row in entry["closed"] if row["folder"]]):       # 폴더가 없는 줄(짝 없는 이름 등)은 이름 표에 보인다
                 refused = shut is not None and shut["refused"]          # 못 여는 곳(공유 경로 등)은 디스크에서 보지 않는다
                 row = rows.setdefault(folder, {"folder": folder, "state": "open", "why": "", "roles": [],
                                                "exists": not refused and Path(folder).is_dir()})
@@ -791,6 +811,7 @@ class Conductor:
                          "승인으로는 열리지 않는다 · 역할 글의 그 줄을 고친다(어느 폴더가 왜 안 되는지는 설정 「프로젝트 밖 폴더」에 보인다)")
         else:
             self._clear_notice("outside-refused")
+        self._name_table(found, pairs, live, others, shared)
         self.roles = found
         for name, role in found.items():
             primary = role
@@ -824,11 +845,79 @@ class Conductor:
             role = found.get(name)
             if role is None or not w.session_write:
                 continue
-            kept = tuple(glob for glob in w.session_write if glob in role.write or not Path(glob.replace("\\", "/")).is_absolute())
+            kept = tuple(glob for glob in w.session_write if glob in role.write or not _outside_glob(glob))
             if len(kept) != len(w.session_write):
                 w.session_write, w.narrowed, w.evict = kept, True, True
                 w.wake.set()
+        for name in stuck_before:                     # 이름 때문에 기다리던 역할: 사람이 폴더를 골랐으면(선언을 더했으면) 줄에 선 일을 다시 본다
+            if not (self._outside.get(name) or {}).get("blocked") and name in self._workers:
+                self._workers[name].wake.set()
         self._ensure_account_loop()
+
+    def _refresh_folders(self) -> None:
+        """떠 있는 동안 고친 이름 선언(gaf.json 의 folders)을 다시 읽는다 — 선언은 권한이 아니라(짝이 권한이다) 믿음 절차 없이 바로 듣는다.
+
+        다른 설정은 건드리지 않는다(켤 때 읽은 것을 쓴다 — _hold_commands 의 까닭 그대로). 못 읽으면(반쯤 저장된 파일 · 깨진 JSON ·
+        더 높은 min_version) 앞의 선언을 쓴다 — 알림은 훅의 믿음 쪽(_refresh_hooks_trust)이 낸다."""
+        signature = _file_sig(self.paths.config)
+        if signature == self._folders_signature:
+            return
+        try:
+            updated = load_config(self.paths)
+        except VersionError as exc:                   # 다른 사람이 새 표기로 옮겨 적고 최소 판을 올렸다 — 옛 뜻으로 읽고 계속 돌지 않는다
+            self._needs_version = str(exc)
+            self._notice("config:version", "warn", f"{exc} — 올릴 때까지 어느 역할도 새 글을 시작하지 않는다")
+            return
+        except ConfigError:
+            return
+        self._folders_signature = signature
+        self.config.folders = dict(updated.folders)
+        if self._needs_version:
+            self._needs_version = ""
+            self._clear_notice("config:version")
+            for w in self._workers.values():          # 기다리던 글을 다시 본다
+                w.wake.set()
+
+    def _name_table(self, found: dict[str, Role], pairs: dict[str, str], live: list[str], others=(), shared: dict | None = None) -> None:
+        """화면에 줄 이름 표와 알림 — 선언한 이름 · 역할이 쓰는 이름 · 선언 없이 남은 짝을 한 표로(역할을 읽을 때 한 번 만든다)."""
+        shared = shared if shared is not None else {}
+        table: dict[str, dict] = {}
+        folders = {outside.name_key(name): folder for name, folder in pairs.items()}
+        for name, about in self.config.folders.items():
+            folder = folders.get(outside.name_key(name), "")
+            table[outside.name_key(name)] = {"name": name, "about": about, "state": "paired" if folder else "unpaired", "folder": folder,
+                                             "roles": [], "exists": outside.exists(folder), "why": ""}
+        for name, folder in pairs.items():            # 선언에서 빠진 뒤 남은 짝 — 보여야 사람이 푼다(이름을 지우는 것은 짝을 푸는 것이 아니다)
+            table.setdefault(outside.name_key(name), {"name": name, "about": "", "state": "undeclared", "folder": folder,
+                                                      "roles": [], "exists": outside.exists(folder), "why": ""})
+        for name in live:
+            for used in self._outside[name].get("names", ()):
+                row = table.setdefault(outside.name_key(used["name"]), {"name": used["name"], "about": "", "state": "undeclared",
+                                                                        "folder": "", "roles": [], "exists": False, "why": ""})
+                if name not in row["roles"]:
+                    row["roles"].append(name)
+        for row in table.values():                    # 짝은 있는데 그 폴더를 못 쓰는 까닭(없는 폴더 · 못 여는 곳 · 다른 곳으로 가는 연결) — 쓰는 역할이 없어도 보인다
+            if row["folder"]:
+                if "places" not in shared and not outside._share(row["folder"]) and Path(row["folder"]).is_absolute():
+                    shared["places"] = outside.Places(self.paths.root, others)
+                row["why"] = outside.pair_problem(row["folder"], self.paths.root, others=others, places=shared.get("places"))[1]
+        self._outside_names = [table[key] for key in sorted(table)]
+        stuck = {name: self._outside[name]["blocked"] for name in live if self._outside[name].get("blocked")}
+        if not stuck:
+            self._clear_notice("outside-names")
+            return
+        rows = [row for blocked in stuck.values() for row in blocked]
+        parts = []
+        for state, label in (("unpaired", "이 PC 에서 폴더를 고르지 않은 이름"), ("undeclared", "gaf.json 의 folders 에 없는 이름"),
+                             ("missing", "짝지은 폴더가 지금 없는 이름"), ("refused moved", "짝지은 폴더를 다시 골라야 하는 이름")):
+            wanted = sorted({row["name"] for row in rows if row["state"] in state.split()})
+            if wanted:
+                parts.append(f"{label}: {', '.join('@' + name for name in wanted)}")
+        wrong = sorted(name for name, blocked in stuck.items() if any(row["state"] == "invalid" for row in blocked))
+        if wrong:
+            parts.append(f"이름 참조를 잘못 적은 역할: {', '.join(wrong)}")
+        self._notice("outside-names", "warn", f"프로젝트 밖 폴더의 이름을 아직 쓸 수 없어 일을 시작하지 않는 역할이 있다(역할: {', '.join(sorted(stuck))}) — "
+                     + " · ".join(parts) + " — PC 화면의 설정 「프로젝트 밖 폴더」에서 폴더를 고른다(없는 이름은 더하거나 역할 글을 고친다)")
 
     def _other_projects(self) -> list[str]:
         """이 PC 의 목록에 있는 다른 프로젝트의 뿌리들 — 프로젝트 밖 쓰기 폴더가 그 안팎과 겹치면 열지 않는다."""
@@ -840,19 +929,39 @@ class Conductor:
         except OSError:
             return []
 
-    def _outside_scope(self, role: Role, allowed, others, scopes: dict, shared: dict | None = None) -> Role:
+    def _outside_scope(self, role: Role, allowed, others, scopes: dict, shared: dict | None = None, names=None) -> Role:
         """역할의 프로젝트 밖 쓰기 글롭은 이 PC 에서 승인한 폴더 안의 것만 적용한다(gaf/outside.py · 1.13.0).
 
         문 · 쓰기 폴더 · 지시문 · 화면이 모두 여기서 바꿔 끼운 `role.write`(적용한 범위)를 본다. 적은 그대로의 값과 닫은 것은 `_outside` 에 둔다.
-        안쪽 글롭만 가진 역할은 그대로 돌려준다(디스크를 보지 않는다)."""
-        if not any(Path(pattern.replace("\\", "/")).is_absolute() for pattern in role.write):
-            scopes[role.name] = {"raw": list(role.write), "closed": [], "open": []}
+        안쪽 글롭만 가진 역할은 그대로 돌려준다(디스크를 보지 않는다).
+        names = (선언한 이름 → 설명, 이름 → 이 PC 의 폴더) — 이름 글롭(`@이름/…` · 1.14.0)은 선언과 짝이 다 있을 때만 그 폴더 아래의 절대 글롭으로 바뀐다."""
+        if not role.refs and not any(_outside_glob(pattern) for pattern in role.write):
+            scopes[role.name] = {"raw": list(role.write), "closed": [], "open": [], "names": [], "blocked": []}
             return role
         shared = shared if shared is not None else {}
         if "places" not in shared:
             shared["places"] = outside.Places(self.paths.root, others)
-        applied, closed, opened = outside.resolve(role.write, self.paths.root, allowed, others=others, places=shared["places"])
-        scopes[role.name] = {"raw": list(role.write), "closed": closed, "open": opened}
+        declared, pairs = names if names is not None else (dict(self.config.folders), {})
+        applied, closed, opened = outside.resolve(role.write, self.paths.root, allowed, others=others, places=shared["places"],
+                                                  refs=role.refs, names=declared, pairs=pairs)
+        used: list[dict] = []                         # 이 역할이 쓰는 이름(잘 적은 참조의 것) — 지시문 · 환경변수 · 화면이 같은 값을 본다
+        about = {outside.name_key(name): text for name, text in declared.items()}
+        folders = {outside.name_key(name): folder for name, folder in pairs.items()}
+        waits = {outside.name_key(row["name"]): row["state"] for row in closed if row.get("name") and row.get("state") in NAME_WAITS}
+        for ref in role.refs:
+            try:
+                name = outside.ref_parts(ref)[0]
+            except outside.OutsideError:
+                continue
+            key = outside.name_key(name)
+            if any(outside.name_key(row["name"]) == key for row in used):
+                continue
+            ready = key in about and bool(folders.get(key)) and key not in waits       # 선언 · 짝 · 폴더가 다 있다 — 경로를 알려도 된다
+            state = "undeclared" if key not in about else "unpaired" if not folders.get(key) else "paired"
+            used.append({"name": name, "state": state, "ready": ready, "folder": folders.get(key, "") if state == "paired" else "",
+                         "about": about.get(key, ""), "why": "" if ready else waits.get(key, "")})
+        blocked = [row for row in closed if row.get("state") in NAME_WAITS]
+        scopes[role.name] = {"raw": list(role.write), "closed": closed, "open": opened, "names": used, "blocked": blocked}
         return replace(role, write=applied) if applied != role.write else role
 
     def _unscoped(self, role: Role) -> Role:
@@ -866,11 +975,50 @@ class Conductor:
 
     def _outside_closed(self, name: str) -> list[str]:
         """그 역할의 역할 글에 적혀 있으나 이 PC 에서 아직 승인하지 않아 닫힌 프로젝트 밖 폴더들(사람이 승인하면 열린다)."""
-        return list(dict.fromkeys(row["folder"] for row in (self._outside.get(name) or {}).get("closed", []) if not row["refused"]))
+        return list(dict.fromkeys(row["folder"] for row in (self._outside.get(name) or {}).get("closed", [])
+                                  if not row["refused"] and "state" not in row))                  # 이름 줄(짝 없음 · 선언 없음)은 따로 센다(_names_blocked)
 
     def _outside_refused(self, name: str) -> list[str]:
         """그 역할의 역할 글에 적혀 있으나 이 틀이 열지 않는 프로젝트 밖 폴더들(승인으로는 안 열린다 — 역할 글을 고쳐야 한다)."""
-        return list(dict.fromkeys(row["folder"] for row in (self._outside.get(name) or {}).get("closed", []) if row["refused"]))
+        return list(dict.fromkeys(row["folder"] for row in (self._outside.get(name) or {}).get("closed", [])
+                                  if row["refused"] and row["folder"] and row.get("state") not in NAME_WAITS))     # 다시 골라야 하는 짝은 이름 쪽 알림이 맡는다
+
+    def _names_blocked(self, name: str) -> str:
+        """그 역할이 일 · 검토를 시작하지 못하는 까닭("" = 시작해도 된다) — 쓰기 범위의 이름(`@이름`)을 이 PC 에서 아직 쓸 수 없다.
+
+        짝이 없는 채로 일을 시키면 역할은 엉뚱한 곳(프로젝트 안)에 만들고 「했다」고 한다 — 사람이 폴더를 고를 때까지 줄에 세워 둔다(11-25 GPT 검토 6절)."""
+        rows = (self._outside.get(name) or {}).get("blocked") or []
+        if not rows:
+            return ""
+        parts = []
+        for state, tail in (("unpaired", "의 폴더를 이 PC 에서 아직 고르지 않았다"), ("undeclared", "은(는) gaf.json 의 folders 에 없는 이름이다"),
+                            ("missing", "에 짝지은 폴더가 지금 없다(드라이브가 빠졌거나 폴더를 옮겼다)"),
+                            ("refused moved", "에 짝지은 폴더를 쓸 수 없게 됐다(이 틀이 열지 않는 곳이거나 다른 곳을 가리키는 연결이 됐다 — 다시 고른다)")):
+            wanted = list(dict.fromkeys(row["name"] for row in rows if row["state"] in state.split()))
+            if wanted:
+                parts.append(f"프로젝트 밖 폴더의 이름 {', '.join('@' + item for item in wanted)} {tail}")
+        wrong = [row["pattern"] for row in rows if row["state"] == "invalid"]
+        if wrong:
+            parts.append(f"쓰기 범위에 잘못 적은 이름 참조가 있다({', '.join(wrong)})")
+        return " · ".join(parts) + " — PC 화면의 설정 「프로젝트 밖 폴더」에서 폴더를 고르거나 역할 글을 고치면 시작한다"
+
+    def _name_lines(self, name: str) -> list[str]:
+        """지시문에 싣는 줄 — 그 역할이 쓰는 이름마다 이 PC 의 폴더(짝이 없으면 아직 못 쓴다는 것)."""
+        lines = []
+        for used in (self._outside.get(name) or {}).get("names", ()):
+            if used["ready"]:
+                lines.append(f"@{used['name']} = {used['folder']}" + (f" — {used['about']}" if used["about"] else ""))
+            else:
+                what = {"missing": "짝지은 폴더가 지금 없다", "refused": "짝지은 폴더를 쓸 수 없게 됐다", "moved": "짝지은 폴더를 쓸 수 없게 됐다"}.get(
+                    used["why"], "이 PC 에서 아직 폴더를 고르지 않았다")
+                lines.append(f"@{used['name']} — {what}(쓸 수 없다 — 거기에 써야 하는 일이면 프로젝트 안에 대신 만들지 말고 "
+                             f"마지막 답의 첫 줄을 「막힘: 프로젝트 밖 폴더의 이름 @{used['name']}」으로 쓴다)")
+        return lines
+
+    def _folders_env(self, name: str) -> str:
+        """환경변수 GAF_FOLDERS 의 값 — 그 역할이 쓰는 짝 있는 이름 → 이 PC 의 폴더(JSON). 스크립트가 경로를 박지 않고 이름으로 찾는다."""
+        return json.dumps({used["name"]: used["folder"] for used in (self._outside.get(name) or {}).get("names", ())
+                           if used["ready"]}, ensure_ascii=False)
 
     def _outside_lines(self, role: Role) -> list[str]:
         """일 글에 붙이는 줄 — 역할 글대로 프로젝트 밖에 쓰려다 막혀 헤매지 않게, 닫혀 있는 곳과 할 일을 미리 알린다."""
@@ -893,8 +1041,11 @@ class Conductor:
     def _scoped(self, role: Role) -> Role:
         """역할 하나를 지금의 승인으로 가린다. 프로젝트 밖 글롭이 없으면 승인 파일 · 프로젝트 목록을 읽지 않는다."""
         scopes: dict[str, dict] = {}
-        if any(Path(pattern.replace("\\", "/")).is_absolute() for pattern in role.write):
-            role = self._outside_scope(role, outside.approved(self.paths.root), self._other_projects(), scopes)
+        absolute = any(_outside_glob(pattern) for pattern in role.write)      # 문과 같은 글로 본다(`./C:/…` 도 절대다)
+        named = bool(role.refs)
+        if absolute or named:
+            role = self._outside_scope(role, outside.approved(self.paths.root) if absolute else (), self._other_projects(), scopes,
+                                       names=(dict(self.config.folders), outside.pairs(self.paths.root) if named else {}))
         else:
             role = self._outside_scope(role, (), (), scopes)
         self._outside[role.name] = scopes[role.name]
@@ -904,21 +1055,46 @@ class Conductor:
         """화면 · 명령줄에 줄 「프로젝트 밖 폴더」 — 역할들이 쓰려는 폴더(실제로 열리는 진짜 자리)마다 상태와 적은 역할, 그리고 이 PC 의 승인 목록.
 
         역할을 읽을 때 만든 표를 준다(`_reload_roles`) — 화면이 자주 부르는 상태 요청에서 디스크를 보지 않는다."""
-        return {"approved": list(self._outside_allowed), "folders": [{**row, "roles": list(row["roles"])} for row in self._outside_rows]}
+        return {"approved": list(self._outside_allowed), "folders": [{**row, "roles": list(row["roles"])} for row in self._outside_rows],
+                "names": [{**row, "roles": list(row["roles"])} for row in self._outside_names]}
 
-    def outside_change(self, *, approve=(), revoke=()) -> dict:
-        """사람이 PC 에서 프로젝트 밖 쓰기 폴더를 승인하거나 거둔다 → 새 「프로젝트 밖 폴더」(outside_view).
+    def outside_change(self, *, approve=(), revoke=(), pair=None, unpair=(), declare=None, undeclare=()) -> dict:
+        """사람이 PC 에서 프로젝트 밖 쓰기 폴더를 승인하거나 거둔다 · 이름을 더하고(declare) 그 이름의 폴더를 고른다(pair) → 새 「프로젝트 밖 폴더」(outside_view).
 
-        못 여는 곳이 하나라도 있으면 아무것도 적지 않는다(OutsideError). 적은 뒤에는 점검을 기다리지 않고 역할을 다시 읽는다 —
-        열려 있는 세션은 열 때의 범위 그대로고(session_write), 다음 세션부터 새 범위다."""
+        못 여는 곳 · 틀린 이름이 하나라도 있으면 아무것도 적지 않는다(OutsideError) — 이름과 짝은 적기 전에 다 가려 본다. 적은 뒤에는 점검을
+        기다리지 않고 역할을 다시 읽는다 — 열려 있는 세션은 열 때의 범위 그대로고(session_write), 다음 세션부터 새 범위다(좁히는 것은 바로)."""
+        from .config import change_folders
+
+        pair, declare, unpair, undeclare = dict(pair or {}), dict(declare or {}), list(unpair or ()), list(undeclare or ())
+        kinds = [bool(approve or revoke), bool(pair), bool(unpair), bool(declare), bool(undeclare)]
+        if sum(kinds) > 1:                            # 적는 파일이 다르다(승인 · 짝 · gaf.json) — 섞어 받으면 앞의 것만 적히고 뒤가 실패한다
+            raise outside.OutsideError("한 번에 한 가지만 청한다(approve · revoke / pair / unpair / declare / undeclare)")
+        others = self._other_projects()
         try:
+            if pair:                                      # 짝짓는 이름은 선언에 있어야 한다(오타가 새 이름으로 서지 않게) — 설정을 읽는 것은 이때뿐이다
+                try:
+                    known = {outside.name_key(name) for name in load_config(self.paths).folders}
+                except ConfigError as exc:
+                    raise outside.OutsideError(str(exc)) from None
+                for name in pair:
+                    if not outside.name_error(name) and outside.name_key(name) not in known:
+                        raise outside.OutsideError(f"{outside.UNDECLARED}: {name} — 먼저 이름을 더한다")
+                outside.pair_all(self.paths.root, pair, others=others)       # 다 가린 뒤 한 번에 적는다
+            if unpair:                                    # 푸는 것은 설정을 읽지 않는다 — gaf.json 이 깨졌거나 더 높은 판을 바랄 때도 닫을 수 있어야 한다
+                outside.unpair(self.paths.root, unpair)
+            if declare or undeclare:
+                try:
+                    change_folders(self.paths, declare=declare, undeclare=undeclare)
+                except ConfigError as exc:
+                    raise outside.OutsideError(str(exc)) from None
             if approve:
-                outside.approve(self.paths.root, approve, others=self._other_projects())
+                outside.approve(self.paths.root, approve, others=others)
             if revoke:
                 outside.revoke(self.paths.root, revoke)
         finally:                                      # 승인은 적혔는데 거두기가 실패해도, 적힌 것은 바로 듣는다
             self._reload_roles()
-            self.store.emit("outside", data={"approved": len(self._outside_allowed)})
+            self.store.emit("outside", data={"approved": len(self._outside_allowed),
+                                             "paired": sum(row["state"] == "paired" for row in self._outside_names)})
             self._touch()
         return self.outside_view()
 
@@ -959,8 +1135,16 @@ class Conductor:
         if model is not None and not _MODEL_NAME.fullmatch(str(model)):
             return {"ok": False, "error": f"모델 이름이 이상하다: {model}"}
         if write is not None and (not isinstance(write, list) or not all(
-                isinstance(item, str) and item.strip() and "\n" not in item for item in write)):
+                (isinstance(item, str) and item.strip() and "\n" not in item) or isinstance(item, dict) for item in write)):
             return {"ok": False, "error": "write 는 글롭 글의 목록이어야 한다(예: [\"docs/기획/**\"])"}
+        if write is not None:                         # 프로젝트 밖 폴더의 이름 참조(1.14.0): 만들 때는 화면의 꼴 `@이름/글롭` 으로 적어도 된다 —
+            try:                                      # 역할 글에는 객체로 적는다(옛 판이 조용히 프로젝트 안의 폴더로 읽지 않게). 열리는 것은 이 PC 의 짝이 있을 때다
+                write = [outside.from_text(item) or item for item in write]
+                for item in write:
+                    if isinstance(item, dict):
+                        outside.ref_parts(item)
+            except outside.OutsideError as exc:
+                return {"ok": False, "error": str(exc)}
         if name == self.config.lead_role:
             return {"ok": False, "error": "총괄 역할은 `python -m gaf init` 으로 만든다"}
         try:
@@ -1587,7 +1771,8 @@ class Conductor:
         if count >= JOBS_MAX:
             return {"ok": False, "error": f"배경 일이 이미 {count}개 돈다 — 끝나거나 멈춘 뒤에 띄운다"}
         job_id = f"j-{self._job_n + 1:04d}"
-        env = {**os.environ, **self.session_env, "GAF_ROLE": sender, "GAF_JOB": job_id, "GAF_SESSION": f"job:{job_id}"}
+        env = {**os.environ, **self.session_env, "GAF_ROLE": sender, "GAF_JOB": job_id, "GAF_SESSION": f"job:{job_id}",
+               "GAF_FOLDERS": self._folders_env(sender)}
         env.setdefault("PYTHONIOENCODING", "utf-8")
         log = self.paths.jobs_dir / f"{job_id}.log"
         try:
@@ -2710,12 +2895,18 @@ class Conductor:
         return letter
 
     def _blocked_reason(self, w: _Worker, letter: Letter) -> str:
+        if self._needs_version:
+            return self._needs_version
         if _file_sig(self.paths.config) != self._config_signature:
             self._refresh_hooks_trust()
         if not self._hooks_trusted:
             return HOOKS_TRUST_REASON
         if w.hook_retry_at > time.monotonic():
             return w.hook_reason
+        if letter.kind in ("task", "review"):         # 쓰기 범위의 이름을 이 PC 에서 아직 쓸 수 없는 역할은 일 · 검토를 시작하지 않는다(말 · 글은 받는다)
+            waiting = self._names_blocked(w.name)
+            if waiting:
+                return waiting
         role, _ = self._effective(w.role_file or w.role)
         status, text = self._limit_gate(role.engine)
         if status == "stop" or (status == "hold" and letter.kind in ("task", "review")):
@@ -2783,6 +2974,8 @@ class Conductor:
                    GAF_WRITE_DIRS=os.pathsep.join(str(path) for path in (write_dirs or (self.paths.root,))),
                    # 폴더만으로는 파일 하나짜리 범위가 그 폴더째로 보인다 — 역할 글에 적힌 글롭 그대로도 준다(JSON 목록 · 11-16 다른 프로젝트 총괄의 청).
                    GAF_WRITE_GLOBS=json.dumps(list(w.role.write), ensure_ascii=False),
+                   # 그 역할이 쓰는 프로젝트 밖 폴더의 이름 → 이 PC 의 폴더(JSON · 1.14.0) — 스크립트가 경로를 박지 않게
+                   GAF_FOLDERS=self._folders_env(w.name),
                    GAF_PID=str(os.getpid()), GAF_ROOT=str(self.paths.root), GAF_PROJECT=self.config.project)
         # 검사 · 배경 일의 명령과 같은 기본값 — 없으면 파이썬으로 쓴 명령이 Windows 의 ANSI 코드페이지로 찍어, utf-8 로 읽는
         # 실패 까닭의 한글이 깨진다(11-23 · 1.5.4). 사람이 정해 둔 값은 그대로 둔다.
@@ -3285,10 +3478,16 @@ class Conductor:
             w.session_engine = role.engine
             w.session_write = tuple(role.write)
             w.narrowed = False
+            current = self.roles.get(w.name)         # 여는 사이에 거둔 승인 · 푼 짝: 그때의 다시 읽기는 아직 빈 범위를 보고 지나갔다(11-26 Opus 검수)
+            if current is not None:
+                kept = tuple(glob for glob in w.session_write if glob in current.write or not _outside_glob(glob))
+                if len(kept) != len(w.session_write):
+                    w.session_write, w.narrowed = kept, True       # 문에서는 바로 빼고, 다음 글에서 새로 연다(OS 쓰기 폴더까지 좁히게)
             w.session_deny = self._deny_tools(role)
             w.session_own = self._own_tools(role)
             self._tokens.pop(w.token, None)
             w.token = token
+            self._issued.add(token)                  # 이 표의 세션이 열렸다 — 닫힌 뒤 그 세션의 문은 아무것도 열지 않는다(scope_now)
             self._tokens[token] = w.name
             w.announced, w.evict = None, False
             w.session_id = session.session_id or candidate
@@ -3390,7 +3589,7 @@ class Conductor:
             return []
         patterns = []
         for pattern in role.write:
-            path = Path(pattern.replace("\\", "/"))
+            path = Path(scope.plain_glob(pattern))
             path = path if path.is_absolute() else self.paths.root / path
             patterns.append(pattern.rstrip("/\\") + "/**"
                             if not any(char in pattern for char in "*?[") and path.is_dir() else pattern)
@@ -3452,6 +3651,10 @@ class Conductor:
                       + "\n".join(paths)
                       + f"\n명령은 프로젝트 뿌리에서 돌린다 — 먼저 `{command}` 을 친다. "
                       f"패치(apply_patch)의 경로는 전체 경로({root}/…)로 적는다 — 뿌리부터의 경로로 적으면 문이 막는다.")
+        named = self._name_lines(role.name)
+        if named:                                     # 역할 글 · 쓰기 범위의 `@이름` 이 이 PC 의 어느 폴더인지(1.14.0) — 짝이 바뀌면 이 글이 바뀌어 새 대화가 된다
+            intro += ("\n\n[프로젝트 밖 폴더] 쓰기 범위 · 역할 글의 `@이름` 은 이 PC 의 아래 폴더다. 경로는 PC 마다 다르니 글과 스크립트에 박지 않고 "
+                      "이름으로 적는다(스크립트는 환경변수 GAF_FOLDERS 의 JSON 에서 찾는다):\n" + "\n".join(named))
         shell = "tools" if getattr(engine, "commands", "shell") == "tools" else getattr(engine, "shell", "bash")
         prefix = getattr(engine, "tool_prefix", lead_tools.TOOL_PREFIX)      # 도구 이름의 앞머리는 엔진마다 다르다
         tail = [(lead_tools.usage(shell, prefix) if role.lead else lead_tools.peer_usage(shell, prefix)).strip()]
@@ -3500,6 +3703,13 @@ class Conductor:
         # 낱말로 막지 않게 살피지 않고 지나게 한다(무엇을 해도 되는지는 handler 가 본다 — 역할은 send · team 만 받는다).
         own = self._own_tools(role)
 
+        def scope_now() -> tuple:
+            """이 세션의 문이 지금 볼 쓰기 범위. 열려 있는 동안은 일꾼이 쥔 지금의 범위다 — 거둔 승인 · 푼 짝은 열린 세션에서도 바로 빠진다
+            (연 때의 범위를 여기 따로 쥐고 있어, 거둔 뒤에도 Claude 세션의 도구가 계속 썼다 — 11-26 GPT 검토 · 1.13.0 의 구멍)."""
+            if token and w.token == token:
+                return w.session_write
+            return () if token in self._issued else write       # 닫힌 세션 → 빈 범위 · 아직 여는 중(또는 표 없는 세션) → 연 때의 범위
+
         async def gate(tool_name: str, tool_input: dict[str, Any]) -> tuple[bool, str]:
             if tool_name in own:
                 return True, ""
@@ -3507,7 +3717,7 @@ class Conductor:
                 allowed, reason = False, SESSION_TOOLS_REASON
             else:
                 try:
-                    allowed, reason = await asyncio.to_thread(scope.check_tool, tool_name, tool_input, write=write,
+                    allowed, reason = await asyncio.to_thread(scope.check_tool, tool_name, tool_input, write=scope_now(),
                                                               root=self.paths.root, bash_deny=self.config.bash_deny)
                 except Exception as exc:  # noqa: BLE001 — 살피다 난 오류로 열어 주지 않는다(훅 쪽 gate() 와 같다)
                     allowed, reason = False, f"문: 살피다 오류가 났다({type(exc).__name__}) — 막는다"
@@ -3518,7 +3728,7 @@ class Conductor:
         async def asker(questions: list[dict[str, Any]]) -> dict[str, str] | None:
             return await self._ask(w, questions)
 
-        env = {**self.session_env, "GAF_ROLE": role.name}
+        env = {**self.session_env, "GAF_ROLE": role.name, "GAF_FOLDERS": self._folders_env(role.name)}
         if token:
             env["GAF_SESSION"] = token
         try:
@@ -3971,7 +4181,7 @@ class Conductor:
         suffix = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
         log = self.paths.jobs_dir / f"{task_id}-check-{n}-{safe}-{suffix}.log"
         env = {**os.environ, **self.session_env, "GAF_ROLE": w.name, "GAF_TASK": task_id,
-               "GAF_CHECK": str(n), "GAF_SESSION": f"check:{task_id}"}
+               "GAF_CHECK": str(n), "GAF_SESSION": f"check:{task_id}", "GAF_FOLDERS": self._folders_env(w.name)}
         env.setdefault("PYTHONIOENCODING", "utf-8")
         started = self.clock()
         handle, code, reason = None, None, ""

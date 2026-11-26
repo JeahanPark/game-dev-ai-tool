@@ -219,7 +219,7 @@ dialog[open]{display:flex;flex-direction:column}.dialog-head{display:flex;align-
 </aside>
 </div>
 <div id="menu" class="menu" hidden><div id="menu-items" role="menu" aria-label="세션 메뉴"></div></div>
-<dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><section id="settings-outside-section" hidden><h3>프로젝트 밖 폴더</h3><p id="settings-outside-note" class="muted"></p><div id="settings-outside"></div></section><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-voice"><h3>음성 입력</h3><p id="voice-status"></p><form id="voice-form" class="form"><label for="voice-key">GPT 로 받아쓰기 — OpenAI API 키(넣은 값은 다시 보이지 않는다)</label><div class="pick-row"><input id="voice-key" type="password" autocomplete="off" placeholder="sk-…"><button id="voice-save" type="submit">저장</button><button id="voice-clear" type="button" hidden>지우기</button></div><p class="muted">ChatGPT Pro 구독이면 ChatGPT 설정 → Billing 에서 API 크레딧을 받고 API 키를 만든다. 키를 넣으면 말을 마칠 때 목소리를 OpenAI 로 보내 받아쓴다.</p><p id="voice-error" class="message" role="status"></p></form></section><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
+<dialog id="settings" aria-labelledby="settings-title"><div class="dialog-head"><h2 id="settings-title">설정</h2><button type="button" data-close="settings">닫기</button></div><div class="dialog-body"><p id="settings-error" class="message" role="status"></p><h3>사용량</h3><div id="settings-limits"></div><h3>역할</h3><div id="settings-roles"></div><section id="settings-outside-section" hidden><h3>프로젝트 밖 폴더</h3><p id="settings-outside-note" class="muted"></p><div id="settings-outside"></div><form id="outside-form" class="form" hidden><div class="pick-row"><input id="outside-name" maxlength="30" placeholder="이름(예: 그림)" aria-label="프로젝트 밖 폴더의 이름"><input id="outside-about" maxlength="200" placeholder="설명(선택)" aria-label="이름의 설명"><button type="submit">이름 더하기</button></div></form></section><h3>원격 기기</h3><div id="settings-remote"></div><section id="settings-voice"><h3>음성 입력</h3><p id="voice-status"></p><form id="voice-form" class="form"><label for="voice-key">GPT 로 받아쓰기 — OpenAI API 키(넣은 값은 다시 보이지 않는다)</label><div class="pick-row"><input id="voice-key" type="password" autocomplete="off" placeholder="sk-…"><button id="voice-save" type="submit">저장</button><button id="voice-clear" type="button" hidden>지우기</button></div><p class="muted">ChatGPT Pro 구독이면 ChatGPT 설정 → Billing 에서 API 크레딧을 받고 API 키를 만든다. 키를 넣으면 말을 마칠 때 목소리를 OpenAI 로 보내 받아쓴다.</p><p id="voice-error" class="message" role="status"></p></form></section><section id="settings-app" hidden><h3>앱으로 쓰기</h3><p id="app-status" role="status"></p><button id="app-install" type="button" hidden>홈 화면에 앱으로 설치</button></section><section id="settings-program" hidden><h3>프로그램</h3><p>창을 닫아도 AI 는 뒤에서 계속 일한다. 다 끄려면 아래 단추를 누른다.</p><button id="program-shutdown" type="button" class="danger">프로그램 끄기</button></section><section id="settings-tools-section" hidden><h3>외부 도구</h3><div id="settings-tools"></div></section></div></dialog>
 <dialog id="custom-edit" aria-labelledby="custom-title"><div class="dialog-head"><h2 id="custom-title">Custom</h2><button id="custom-close" type="button">닫기</button></div><form id="custom-form" class="dialog-body form"><p id="custom-path" class="muted"></p><p>도구 이름 대신 할 일만 적는다 — 예: 배경음악은 Suno 로 · Claude · GPT 둘 다 알아듣게</p><label for="custom-text">추가할 글(20,000자까지)</label><textarea id="custom-text" maxlength="20000"></textarea><p class="muted">비우고 저장하면 Custom 파일을 지운다.</p><p id="custom-error" class="message" role="status"></p><div class="actions"><button id="custom-save" type="submit" class="primary">저장</button></div></form></dialog>
 <dialog id="projects" aria-labelledby="projects-title"><div class="dialog-head"><h2 id="projects-title">프로젝트</h2><button type="button" data-close="projects">닫기</button></div><div class="dialog-body"><p id="projects-error" class="message" role="status"></p><div id="project-list"></div><button id="project-new-open" type="button" hidden>+ 새 프로젝트</button><form id="project-new-form" class="form" hidden><h3>새 프로젝트</h3><label class="kind"><input id="project-new-existing" type="radio" name="project-new-kind" checked>이미 있는 게임 폴더</label><label class="kind"><input id="project-new-fresh" type="radio" name="project-new-kind">새 폴더로 시작</label><div id="project-new-name-box" class="form" hidden><label for="project-new-name">프로젝트 이름(폴더 이름이 된다)</label><input id="project-new-name" maxlength="60" autocomplete="off" placeholder="예: 내게임"></div><label id="project-new-path-label" for="project-new-path">게임 폴더</label><div class="pick-row"><input id="project-new-path" autocomplete="off" placeholder="예: C:\Games\내게임"><button id="project-new-pick" type="button">폴더 고르기</button></div><p class="muted">이 폴더 안에서 AI 가 파일을 읽고 고친다. gaf.json · team · wiki 가 생긴다(이미 준비된 폴더면 그대로 연다).</p><p id="project-new-error" class="message" role="status"></p><div class="actions"><button id="project-new-save" type="submit" class="primary">만들기</button></div></form></div></dialog>
 <dialog id="model-set" aria-labelledby="model-set-title"><div class="dialog-head"><h2 id="model-set-title">모델 · 세기</h2><button type="button" data-close="model-set">닫기</button></div><form id="model-set-form" class="dialog-body form"><label for="model-set-text">모델</label><input id="model-set-text" maxlength="80" autocomplete="off" placeholder="모델 이름(비우면 엔진 기본)"><label for="model-set-effort">세기(effort)</label><select id="model-set-effort"></select><p class="muted">다음 답부터 쓴다. 모델을 바꾸면 그 역할은 새 대화로 시작한다.</p><p id="model-set-error" class="message" role="status"></p><button id="model-set-save" type="submit" class="primary">저장</button></form></dialog><dialog id="role-new" aria-labelledby="role-new-title"><div class="dialog-head"><h2 id="role-new-title">새 역할</h2><button type="button" data-close="role-new">닫기</button></div><form id="role-new-form" class="dialog-body form"><label for="role-new-name">이름</label><input id="role-new-name" maxlength="40" autocomplete="off" placeholder="예: 레벨"><label id="role-new-template-label" for="role-new-template">서랍에서 고르기</label><select id="role-new-template"><option value="">직접 쓰기</option></select><label for="role-new-duty">하는 일</label><textarea id="role-new-duty" placeholder="예: 스테이지 배치와 난이도 곡선을 만든다"></textarea><details><summary>더 정하기(비워 두면 기본값)</summary><div><label for="role-new-engine">엔진</label><select id="role-new-engine"></select><label for="role-new-model">모델</label><input id="role-new-model" autocomplete="off"><label for="role-new-effort">세기</label><select id="role-new-effort"></select><label for="role-new-write">쓰기 범위(한 줄에 하나 · 예: docs/레벨/**)</label><textarea id="role-new-write"></textarea></div></details><p id="role-new-error" class="message" role="status"></p><div class="actions"><button class="primary" type="submit">만들기</button></div></form></dialog>
@@ -1101,20 +1101,34 @@ function updateSettings() {
     row.append(scope); $('settings-roles').append(row);
   }
   // 역할이 쓰려는 프로젝트 밖 폴더(실제로 열리는 폴더)와 이 PC 의 승인 — 승인 · 거두기는 PC 화면에서만 한다(1.13.0)
-  const beyond = state.outside || {}, folders = beyond.folders || [], granted = beyond.approved || [], here = state.remote?.via !== 'remote';
+  const beyond = state.outside || {}, folders = beyond.folders || [], granted = beyond.approved || [], labels = beyond.names || [], here = state.remote?.via !== 'remote';
   const shut = folders.filter(item => item.state === 'closed').map(item => item.folder), outsideWords = {open:'열림', closed:'닫힘 — 승인 전', refused:'열 수 없는 곳'};
+  const outsideButton = (text, data) => { const b = button(text, async () => { b.disabled = true; await act('/api/outside', data, 'settings-error'); b.disabled = false; }); return b; };
   const outsideRow = (title, detail, text, data) => {
     const row = settingsRow(title, detail);
-    if (here && text) { const b = button(text, async () => { b.disabled = true; await act('/api/outside', data, 'settings-error'); b.disabled = false; }); row.append(b); }
+    if (here && text) row.append(outsideButton(text, data));
     $('settings-outside').append(row);
   };
   $('settings-outside').replaceChildren();
+  // 프로젝트 밖 폴더의 이름(1.14.0): 역할 글에는 경로 대신 이름을 적고(gaf.json 의 folders), 진짜 폴더는 PC 마다 여기서 고른다 — 고르는 것이 그 폴더의 승인이다
+  for (const item of labels) {
+    const lost = item.state === 'undeclared';
+    const row = settingsRow('@' + item.name, [item.folder || (lost ? '' : '폴더를 고르지 않음'), lost && '선언하지 않은 이름', item.folder && !item.exists && '없는 폴더',
+      item.exists && item.why, item.about, item.roles.join(', ')].filter(Boolean).join(' · '));
+    if (here) {
+      row.append(lost ? outsideButton('이름 더하기', {declare:{[item.name]:''}}) : button(item.folder ? '폴더 바꾸기' : '폴더 고르기', () => pickOutside(item)));
+      if (item.folder) row.append(outsideButton('짝 풀기', {unpair:[item.name]}));
+      if (!lost && !item.roles.length) row.append(outsideButton('이름 지우기', {undeclare:[item.name]}));
+    }
+    $('settings-outside').append(row);
+  }
   if (here && shut.length > 1) outsideRow('닫힌 곳 ' + shut.length + '곳', '역할이 쓰려는데 아직 승인하지 않은 폴더다', '모두 승인', {approve:shut});
   for (const item of folders) outsideRow(item.folder, (outsideWords[item.state] || item.state) + ' · ' + item.roles.join(', ') + (item.exists ? '' : ' · 없는 폴더')
     + (item.state === 'refused' ? ' · ' + item.why : ''), item.state === 'closed' && '승인', {approve:[item.folder]});
   for (const folder of granted) outsideRow(folder, '이 PC 에서 승인한 폴더 — 그 아래까지 열린다', '거두기', {revoke:[folder]});
-  $('settings-outside-note').textContent = '역할이 프로젝트 밖에 쓰려는 폴더다. 이 PC 에서 승인한 폴더만 열린다 — 파일 하나만 적어도 그 폴더 전체가 열린다.' + (here ? '' : ' 승인은 PC 화면에서 한다.');
-  $('settings-outside-section').hidden = !folders.length && !granted.length;
+  $('settings-outside-note').textContent = '@이름은 역할 글에 경로 대신 적는 이름이다 — 진짜 폴더는 PC 마다 고른다. 경로로 적은 곳은 이 PC 에서 승인한 폴더만 열린다 — 파일 하나만 적어도 그 폴더 전체가 열린다.' + (here ? '' : ' 고르기 · 승인은 PC 화면에서 한다.');
+  $('outside-form').hidden = !here; $('outside-form').onsubmit = declareOutside;
+  $('settings-outside-section').hidden = !here && !folders.length && !granted.length && !labels.length;      // PC 화면에는 늘 보인다(첫 이름을 더할 곳)
   $('settings-tools').replaceChildren();
   for (const tool of state.tools || []) $('settings-tools').append(settingsRow(tool.name + ' · ' + (tool.makes || ''), tool.on ? '켬' : '끔'));
   $('settings-tools-section').hidden = !(state.tools || []).length;
@@ -1127,6 +1141,16 @@ function updateSettings() {
       detail + (plan ? ' · ' + plan : '')));
   }
   showRemote();
+}
+async function pickOutside(item) {
+  // 이 PC 에 폴더 선택 창을 띄워(프로젝트 폴더를 고르는 그 창) 고른 폴더를 그 이름의 짝으로 맺는다 — 창을 그냥 닫으면 아무것도 하지 않는다
+  try { const got = await api('/api/projects', {pick:true, start:item.folder || ''}); if (got.folder) await act('/api/outside', {pair:{[item.name]:got.folder}}, 'settings-error'); }
+  catch (error) { $('settings-error').textContent = error.message; }
+}
+async function declareOutside(event) {
+  event.preventDefault();
+  const name = $('outside-name').value.trim();
+  if (name && await act('/api/outside', {declare:{[name]:$('outside-about').value.trim()}}, 'settings-error')) { $('outside-name').value = ''; $('outside-about').value = ''; }
 }
 async function showRemote() {
   if (!$('settings').open) return;

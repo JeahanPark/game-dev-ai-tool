@@ -18,7 +18,7 @@ from pathlib import Path
 from . import __version__, cloudvoice, desktop, doctor, firstrun, hooks, launch, library, outside, projects, remote, remote_ops, tailnet
 from .remote_ops import fixed_port as _fixed_port
 from .app import build, install_commands, pid_alive, read_server
-from .config import load_config
+from .config import ConfigError, change_folders, load_config
 from .dictation import Dictation
 from .envclean import clean_env
 from .paths import Paths, _atomic_json, _atomic_text, _read_json, file_lock, find_root, run_dir
@@ -155,9 +155,12 @@ def _parser():
     voice.add_argument("action", nargs="?", default="status", choices=["status", "setup"])
     work_hooks = command("hooks", "일 앞뒤 명령 · 기본 검사와 믿음을 본다 · trust 는 둘을 함께 믿는다")
     work_hooks.add_argument("action", nargs="?", choices=["trust"], metavar="trust")
-    beyond = command("outside", "역할이 쓰려는 프로젝트 밖 폴더를 본다 · approve 로 이 PC 에서 승인하고 revoke 로 거둔다(사람만 쓴다)")
-    beyond.add_argument("action", nargs="?", choices=["approve", "revoke"], metavar="approve|revoke")
-    beyond.add_argument("folders", nargs="*", metavar="폴더", help="승인하거나 거둘 폴더(절대 경로)")
+    beyond = command("outside", "역할이 쓰려는 프로젝트 밖 폴더와 이름을 본다 · approve/revoke 로 폴더를 승인하고 거둔다 · declare/undeclare 로 이름을 "
+                     "적고 지운다 · pair/unpair 로 그 이름의 이 PC 폴더를 고르고 푼다 · path 로 그 폴더를 찾는다(path 말고는 사람만 쓴다)")
+    beyond.add_argument("action", nargs="?", choices=["approve", "revoke", "declare", "undeclare", "pair", "unpair", "path"],
+                        metavar="approve|revoke|declare|undeclare|pair|unpair|path")
+    beyond.add_argument("folders", nargs="*", metavar="값", help="approve · revoke: 폴더(절대 경로)… / declare: 이름 [설명] / undeclare · unpair: 이름… / "
+                        "pair: 이름 폴더 / path: 이름")
     beyond.add_argument("--all", action="store_true", help="approve: 쓰려는 폴더 전부(못 여는 곳은 뺀다) · revoke: 승인한 폴더 전부")
     checks = command("check", "프로젝트 기본 검사를 본다 · 추가하거나 뺀다")
     actions = checks.add_subparsers(dest="action", required=True)
@@ -558,12 +561,106 @@ def _body(value, file):
 
 
 OUTSIDE_STATES = {"open": "열림", "closed": "닫힘", "refused": "못엶"}
+FOLDERS_ENV = "GAF_FOLDERS"              # 지휘자가 세션 · 일 앞뒤 명령 · 검사 · 배경 일에 주는 「이름 → 이 PC 의 폴더」(JSON · 그 역할이 지금 쓸 수 있는 이름만)
+
+
+def _fail(text: str) -> int:
+    print(f"오류: {text}", file=sys.stderr)
+    return 1
+
+
+def _folder_from_env(args) -> int:
+    """`gaf outside path <이름>` 을 지휘자가 준 값(GAF_FOLDERS)에서만 답한다 — 세션 · 일 앞뒤 명령 · 검사 · 배경 일 안에서 친 것이다.
+
+    접근 값 폴더의 짝 파일을 읽지 않는다: 세션은 그 파일을 못 읽게 돼 있고, 일 앞뒤 명령이 다시 읽으면 그 일이 시작한 뒤 바뀐 짝으로 답해
+    앞뒤가 어긋난다(11-26 GPT 검토). 준 값에 없으면 모르는 것이다 — 파일로 물러서지 않는다."""
+    if len(args.folders) != 1:
+        return _fail("이름 하나를 적는다 — python -m gaf outside path <이름>")
+    if args.root is not None:
+        return _fail("세션 · 일 앞뒤 명령 안에서는 --root 를 받지 않는다(지휘자가 이 역할에 준 이름만 답한다)")
+    try:
+        table = json.loads(os.environ.get(FOLDERS_ENV) or "")
+    except ValueError:
+        table = None
+    if not isinstance(table, dict):
+        return _fail(f"지휘자가 준 폴더 표({FOLDERS_ENV})가 없거나 읽을 수 없다")
+    wanted = outside.name_key(args.folders[0])
+    folder = next((value for name, value in table.items() if outside.name_key(name) == wanted), None)
+    if not isinstance(folder, str) or not folder:
+        return _fail(f"이 역할이 지금 쓸 수 있는 이름이 아니다: {args.folders[0]}(쓰기 범위에 없거나 이 PC 에서 폴더를 고르지 않았다)")
+    print(folder)
+    return 0
+
+
+def _other_roots(paths) -> list[str]:
+    """이 PC 의 목록에 있는 다른 프로젝트의 뿌리들 — 프로젝트 밖 폴더가 그 안팎과 겹치면 열지 않는다."""
+    mine = os.path.normcase(str(paths.root.resolve()))
+    return [row["root"] for row in projects.entries() if os.path.normcase(str(Path(row["root"]).resolve())) != mine]
+
+
+def _outside_names(paths, args):
+    """이름 명령 — declare · undeclare(gaf.json 의 folders) · pair · unpair(이 PC 의 짝) · path(그 이름의 폴더를 한 줄로 찍는다)."""
+    values = list(args.folders)
+    if args.action == "path":
+        if os.environ.get(FOLDERS_ENV) is not None:  # 일 앞뒤 명령 · 검사 안이다(세션 표는 없지만 지휘자가 값을 줬다)
+            return _folder_from_env(args)
+        if len(values) != 1:
+            return _fail("이름 하나를 적는다 — python -m gaf outside path <이름>")
+        name = values[0]
+        if outside.name_error(name):
+            return _fail(f"{outside.NAME_RULE}: {name}")
+        try:
+            declared = {outside.name_key(have) for have in load_config(paths).folders}
+        except ConfigError as error:
+            return _fail(str(error))
+        if outside.name_key(name) not in declared:
+            return _fail(f"{outside.UNDECLARED}: {name} — python -m gaf outside declare {name} 로 적는다")
+        folder = next((value for have, value in outside.pairs(paths.root).items() if outside.name_key(have) == outside.name_key(name)), "")
+        if not folder:
+            return _fail(f"{outside.UNPAIRED}: {name} — python -m gaf outside pair {name} <폴더> 로 고른다")
+        why = outside.pair_problem(folder, paths.root, others=_other_roots(paths))[1]
+        if why:                                      # 없는 폴더 · 못 여는 곳 · 다른 곳으로 가는 연결 — 못 쓰는 짝의 경로는 내주지 않는다
+            return _fail(f"{why}: {folder}")
+        print(folder)
+        return 0
+    tail = "떠 있는 지휘자는 다음 점검 때 알아챈다"
+    try:
+        if args.action == "declare":
+            if not values:
+                return _fail("적을 이름을 적는다 — python -m gaf outside declare <이름> [설명]")
+            change_folders(paths, declare={values[0]: " ".join(values[1:])})
+            print(f"적었다 — 이름 @{values[0]}(gaf.json 의 folders · git 으로 같이 받는다). 폴더는 PC 마다 고른다: "
+                  f"python -m gaf outside pair {values[0]} <폴더>")
+        elif args.action == "undeclare":
+            if not values:
+                return _fail("지울 이름을 적는다 — python -m gaf outside undeclare <이름>…")
+            change_folders(paths, undeclare=values)
+            print(f"지웠다 — 이름 {len(values)}개(이 PC 의 짝은 그대로 남는다 — 풀려면 python -m gaf outside unpair <이름>). {tail}")
+        elif args.action == "pair":
+            if len(values) != 2:
+                return _fail("이름과 폴더를 적는다 — python -m gaf outside pair <이름> <폴더>")
+            name, folder = values
+            if not outside.name_error(name) and outside.name_key(name) not in {outside.name_key(have) for have in load_config(paths).folders}:
+                return _fail(f"{outside.UNDECLARED}: {name} — 먼저 python -m gaf outside declare {name} 로 적는다")
+            left = outside.pair(paths.root, name, folder, others=_other_roots(paths))
+            real = next(value for have, value in left.items() if outside.name_key(have) == outside.name_key(name))
+            print(f"골랐다 — @{name} = {real}(이 PC · 이 프로젝트 — 그 폴더를 이 이름으로 쓰는 것의 승인이다). {tail}")
+        else:
+            if not values:
+                return _fail("풀 이름을 적는다 — python -m gaf outside unpair <이름>…")
+            left = outside.unpair(paths.root, values)
+            print(f"풀었다 — 이름 {len(values)}개(남은 짝 {len(left)}개). {tail}(열려 있는 세션에서도 닫는다)")
+    except (outside.OutsideError, ConfigError) as error:
+        return _fail(f"{error} — 아무것도 적지 않았다")
+    return 0
 
 
 def _outside(paths, args):
     """역할이 쓰려는 프로젝트 밖 폴더를 보이고, 이 PC 에서 승인하거나 거둔다(사람만 — gaf/outside.py · 1.13.0).
 
     `gaf hooks trust` 와 같은 꼴: 지휘자가 꺼져 있어도 된다(역할 글과 접근 값 폴더의 승인 파일만 다룬다) · 떠 있는 지휘자는 다음 점검 때 알아챈다."""
+    if args.action in ("declare", "undeclare", "pair", "unpair", "path"):
+        return _outside_names(paths, args)
     allowed = outside.approved(paths.root)
     if args.action == "revoke":                      # 거두기는 역할 글을 읽지 않는다 — 상관없는 역할 하나가 깨졌다고 못 거두면 안 된다
         folders = list(allowed) if args.all else list(args.folders)
@@ -582,6 +679,13 @@ def _outside(paths, args):
     others = [row["root"] for row in projects.entries() if os.path.normcase(str(Path(row["root"]).resolve())) != mine]
     places = outside.Places(paths.root, others)
     rows: dict[str, dict] = {}
+    pairs = outside.pairs(paths.root)
+    paired = {outside.name_key(name): folder for name, folder in pairs.items()}
+    named: dict[str, dict] = {outside.name_key(name): {"name": name, "about": about, "declared": True, "roles": []}
+                              for name, about in config.folders.items()}
+    for name in pairs:                               # 선언에서 빠진 뒤 남은 짝도 보인다 — 보여야 사람이 푼다
+        named.setdefault(outside.name_key(name), {"name": name, "about": "", "declared": False, "roles": []})
+    wrong: list[str] = []
     for folder in _role_folders(paths):              # 하나씩 읽는다 — 깨진 역할 글은 건너뛰고 알린다
         try:
             role = load_role(paths, config, folder.name)
@@ -597,9 +701,32 @@ def _outside(paths, args):
             row = rows.setdefault(spot, {"roles": [], "why": outside.refusal(spot, paths.root, places=places)})
             if role.name not in row["roles"]:
                 row["roles"].append(role.name)
+        for ref in role.refs:                        # 이름 참조(1.14.0) — 이름마다 쓰는 역할을 모은다
+            try:
+                name = outside.ref_parts(ref)[0]
+            except outside.OutsideError as error:
+                wrong.append(f"  잘못적음  {outside.shown(ref)}  {role.name} — {error}")
+                continue
+            item = named.setdefault(outside.name_key(name), {"name": name, "about": "", "declared": False, "roles": []})
+            if role.name not in item["roles"]:
+                item["roles"].append(role.name)
     if args.action is None:
-        if not rows:
+        if not rows and not named and not wrong:
             print("프로젝트 밖을 쓰려는 역할이 없다" + (f" · 승인해 둔 폴더 {len(allowed)}곳: {', '.join(allowed)}" if allowed else ""))
+            return 0
+        if named or wrong:
+            print("프로젝트 밖 폴더의 이름(gaf.json 의 folders — 진짜 폴더는 PC 마다 고른다)")
+            for key in sorted(named):
+                item, folder = named[key], paired.get(key, "")
+                problem = outside.pair_problem(folder, paths.root, others=others, places=places)[0] if folder else ""
+                state = ("선언없음" if not item["declared"] else "안고름" if not folder
+                         else {"": "고름", "missing": "없는폴더"}.get(problem, "다시고름"))
+                print(f"  {state}  @{item['name']}  {folder or '-'}  {', '.join(item['roles']) or '-'}" + (f" — {item['about']}" if item["about"] else ""))
+            for line in wrong:
+                print(line)
+            print("이름 적기: python -m gaf outside declare <이름> [설명] · 폴더 고르기: python -m gaf outside pair <이름> <폴더> · "
+                  "풀기: python -m gaf outside unpair <이름>")
+        if not rows:
             return 0
         print("역할이 쓰려는 프로젝트 밖 폴더(실제로 열리는 폴더 — 파일 하나만 적어도 그 윗폴더 전체가 열린다)")
         shut = 0
@@ -800,6 +927,8 @@ def _session(args):
     token = os.environ.get("GAF_SESSION")
     if not token:
         return None
+    if args.command == "outside" and args.action == "path":      # 읽기만 하는 조회 — 지휘자가 이 세션에 준 값에서만 답한다(짝 파일을 읽지 않는다)
+        return _folder_from_env(args)
     request = None if args.command in ("serve", "status", "init") else _tool_request(args)
     if request is None:
         print(f"오류: 이 명령은 사람만 쓴다. 세션 안에서 되는 것: {SESSION_ONLY}", file=sys.stderr)

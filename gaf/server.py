@@ -70,6 +70,7 @@ ROUTES = {
     "/api/say": "POST", "/api/decide": "POST", "/api/stop": "POST", "/api/assign": "POST", "/api/custom": "POST",
     "/api/notices": "POST", "/api/shutdown": "POST", "/api/dictate": "POST",
     # 역할이 쓰려는 프로젝트 밖 폴더를 이 PC 에서 승인하거나 거둔다(gaf/outside.py · 1.13.0) — PC에서만 · 무엇이 닫혀 있는지는 상태(`outside`)에 싣는다.
+    # 1.14.0: 프로젝트 밖 폴더의 이름을 더하고 지운다(declare · undeclare — gaf.json 의 folders) · 그 이름의 이 PC 폴더를 고르고 푼다(pair · unpair).
     "/api/outside": "POST",
     # GPT 받아쓰기의 API 키를 넣고 지운다(gaf/cloudvoice.py · 1.9.0) — PC에서만 · 키 값은 답 · 기록에 싣지 않는다.
     "/api/voice": "POST",
@@ -1405,23 +1406,31 @@ class Server:
 
     @staticmethod
     def _outside(c, data) -> dict:
-        """프로젝트 밖 쓰기 폴더의 승인 · 거두기(PC 에서만 — LOCAL_ONLY). 못 여는 곳이 하나라도 있으면 아무것도 적지 않는다."""
+        """프로젝트 밖 쓰기 폴더의 승인 · 거두기와, 이름의 선언(declare · undeclare) · 이 PC 의 폴더 고르기(pair · unpair) — PC 에서만(LOCAL_ONLY).
+
+        한 번에 한 가지다(승인과 거두기는 같이 보낼 수 있다). 못 여는 곳 · 틀린 이름이 하나라도 있으면 아무것도 적지 않는다."""
         from . import outside
 
-        lists = {}
-        for key in ("approve", "revoke"):
+        lists, maps = {}, {}
+        for key, limit in (("approve", OUTSIDE_MAX), ("revoke", OUTSIDE_MAX), ("unpair", outside.NAMES_MAX), ("undeclare", outside.NAMES_MAX)):
             value = data.get(key, [])
-            if not isinstance(value, list) or len(value) > OUTSIDE_MAX or not all(isinstance(item, str) and item.strip() for item in value):
-                raise RequestError(400, f"{key}: 폴더 경로 글의 목록이어야 한다({OUTSIDE_MAX}개까지)")
+            if not isinstance(value, list) or len(value) > limit or not all(isinstance(item, str) and item.strip() for item in value):
+                raise RequestError(400, f"{key}: 글의 목록이어야 한다({limit}개까지)")
             lists[key] = value
-        if not lists["approve"] and not lists["revoke"]:
-            raise RequestError(400, "approve 나 revoke 에 폴더를 적는다")
+        for key in ("pair", "declare"):                  # pair = {이름: 이 PC 의 폴더} · declare = {이름: 설명}
+            value = data.get(key, {})
+            if (not isinstance(value, dict) or len(value) > outside.NAMES_MAX
+                    or not all(isinstance(name, str) and isinstance(item, str) for name, item in value.items())):
+                raise RequestError(400, f"{key}: 이름 → 글의 객체여야 한다({outside.NAMES_MAX}개까지)")
+            maps[key] = value
+        if not any(lists.values()) and not any(maps.values()):
+            raise RequestError(400, "approve · revoke · pair · unpair · declare · undeclare 가운데 하나를 적는다")
         try:
-            view = c.outside_change(approve=lists["approve"], revoke=lists["revoke"])
+            view = c.outside_change(**lists, **maps)
         except outside.OutsideError as exc:
             raise RequestError(400, str(exc)) from None
         except OSError as exc:
-            raise RequestError(500, f"승인을 적지 못했다: {type(exc).__name__}") from None
+            raise RequestError(500, f"적지 못했다: {type(exc).__name__}") from None
         return {"ok": True, "outside": view}
 
     def _file(self, value):

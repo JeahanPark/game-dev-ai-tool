@@ -42,11 +42,43 @@ DEFAULTS = {
     "reviews": [],
     "server": {"port": 0},
     "tools": [],
+    # 프로젝트 밖 폴더의 이름 선언(1.14.0 — 이름 → 설명 · 경로는 적지 않는다): 역할 글의 write 에 `@이름/글롭` 으로 쓰고, 진짜 폴더는 PC 마다
+    # 사람이 고른다(gaf/outside.py). 선언은 권한이 아니다 — 짝이 없으면 아무것도 열리지 않는다.
+    "folders": {},
+    # 이 프로젝트가 바라는 가장 낮은 프로그램 판(1.14.0 부터 본다 · 빈 글 = 따지지 않는다). 옛 판은 이 키를 모른다 — 새 표기를 쓰는 프로젝트는
+    # 쓰는 PC 가 모두 그 판이 된 뒤에 옮겨 적는다.
+    "min_version": "",
 }
+FOLDERS_SINCE = "1.14.0"                 # 이름을 선언하는 프로젝트의 가장 낮은 판 — 그 앞의 판은 `@이름` 을 프로젝트 안의 폴더로 읽는다
+_VERSION = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
 
 
 class ConfigError(ValueError):
     pass
+
+
+class VersionError(ConfigError):
+    """이 프로젝트가 이 프로그램보다 높은 판을 바란다(min_version) — 깨진 설정과 달리 「고칠 때까지 앞의 값으로 돈다」가 아니다."""
+
+
+class _Twice(dict):
+    """같은 키를 두 번 적은 JSON 객체 — 뒤의 값만 남지만 무엇이 겹쳤는지 쥐고 있다(folders 의 이름이 조용히 사라지지 않게 본다)."""
+    twice: tuple = ()
+
+
+def _pairs(items):
+    keys = [key for key, _ in items]
+    twice = tuple(dict.fromkeys(key for key in keys if keys.count(key) > 1))
+    if not twice:
+        return dict(items)
+    found = _Twice(items)
+    found.twice = twice
+    return found
+
+
+def _read(paths: Paths) -> dict:
+    """gaf.json 을 읽는다(메모장 등이 붙이는 UTF-8 BOM 도 건너뛴다 — 11-12 QA 결함-05). 같은 키를 두 번 적은 객체는 그것을 쥐고 있다."""
+    return json.loads(paths.config.read_text(encoding="utf-8-sig"), object_pairs_hook=_pairs)
 
 
 @dataclass
@@ -65,6 +97,7 @@ class Config:
     hooks: dict = field(default_factory=dict)
     checks: list = field(default_factory=list)
     reviews: list = field(default_factory=list)
+    folders: dict = field(default_factory=dict)      # 프로젝트 밖 폴더의 이름 → 설명(1.14.0)
 
 
 def _line_name(value) -> bool:
@@ -164,6 +197,46 @@ def validate_checks(value) -> list[dict]:
     return result
 
 
+def validate_folders(value) -> dict:
+    """프로젝트 밖 폴더의 이름 선언(이름 → 설명)을 본다 → 그대로의 사전. 이름 규칙 · 대소문자와 정규화만 다른 이름 · 설명의 꼴 · 수."""
+    from . import outside
+
+    if not isinstance(value, dict):
+        raise ConfigError("folders: 키와 값이 있는 객체여야 한다(이름 → 설명)")
+    if getattr(value, "twice", ()):
+        raise ConfigError(f"folders: 같은 이름을 두 번 적었다: {', '.join(str(name) for name in value.twice)}")
+    if len(value) > outside.NAMES_MAX:
+        raise ConfigError(f"folders: 이름은 {outside.NAMES_MAX}개까지다")
+    seen: dict[str, str] = {}
+    for name, about in value.items():
+        if outside.name_error(name):
+            raise ConfigError(f"folders: {outside.NAME_RULE}(받은 것: {name!r})")
+        key = outside.name_key(name)
+        if key in seen:
+            raise ConfigError(f"folders: 같은 이름이 둘이다(대소문자나 풀어 쓴 글자만 다르다): {seen[key]} · {name}")
+        seen[key] = name
+        if not isinstance(about, str) or len(about) > outside.ABOUT_MAX or any(ord(char) < 32 or ord(char) == 127 for char in about):
+            raise ConfigError(f"folders.{name}: 설명은 한 줄 글이어야 한다({outside.ABOUT_MAX}자까지)")
+    return dict(value)
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
+def check_min_version(value) -> None:
+    """이 프로그램이 그 프로젝트가 바라는 판보다 낮으면 열지 않는다(ConfigError) — 새 표기를 옛 뜻으로 읽고 도는 것을 막는다."""
+    if value == "":
+        return
+    if not isinstance(value, str) or not _VERSION.fullmatch(value):
+        raise ConfigError("min_version: 판 번호 꼴(예 1.14.0)이어야 한다")
+    import gaf
+
+    current = str(gaf.__version__)
+    if _VERSION.fullmatch(current) and _version(value) > _version(current):
+        raise VersionError(f"min_version: 이 프로젝트는 프로그램 {value} 이상이 필요하다(지금 {current}) — 프로그램을 새 판으로 올린다")
+
+
 def _validate(value, sample, key: str) -> None:
     if isinstance(sample, dict):
         if not isinstance(value, dict):
@@ -216,11 +289,12 @@ def load_config(paths: Paths) -> Config:
     if paths.config.exists():
         try:
             # 11-12 QA 결함-05: 메모장 등이 붙이는 UTF-8 BOM도 건너뛰고 읽는다.
-            supplied = json.loads(paths.config.read_text(encoding="utf-8-sig"))
+            supplied = _read(paths)
         # 11-12 QA 결함-07: 너무 깊은 JSON도 깨진 JSON과 같은 설정 오류로 알린다.
         except (OSError, ValueError, RecursionError) as exc:
             raise ConfigError(f"gaf.json: 설정 JSON을 읽을 수 없다: {exc}") from exc
         _validate(supplied, DEFAULTS, "")
+        validate_folders(supplied.get("folders", {}))    # 합치기 전의 것으로 본다(같은 이름을 두 번 적은 것은 합치면 안 보인다)
         for key, value in supplied.items():
             if isinstance(raw.get(key), dict):
                 raw[key].update(value)
@@ -231,10 +305,52 @@ def load_config(paths: Paths) -> Config:
             re.compile(pattern)
         except re.error as exc:
             raise ConfigError(f"bash_deny[{index}]: 정규식이 잘못됐다: {exc}") from exc
+    check_min_version(raw["min_version"])
     return Config(raw["project"], raw["lead"]["role"], raw["defaults"], raw["limits"],
                   raw["session"], raw["bash_deny"], raw["claude"], raw["server"], raw["tools"], raw,
                   codex=raw["codex"], hooks=raw["hooks"], checks=validate_checks(raw["checks"]),
-                  reviews=validate_reviews(raw["reviews"]))
+                  reviews=validate_reviews(raw["reviews"]), folders=validate_folders(raw["folders"]))
+
+
+def change_folders(paths: Paths, *, declare=None, undeclare=()) -> Config:
+    """프로젝트 밖 폴더의 이름 선언을 고친다(사람이 PC 화면 · 명령줄에서) → 새 설정. folders 밖의 키는 그대로 둔다.
+
+    declare = {이름: 설명}(있는 이름이면 그 줄을 바꾼다 — 대소문자만 달라도 같은 이름이다) · undeclare = 지울 이름들. 하나라도 틀리면 아무것도
+    적지 않는다(ConfigError). 이름을 적는 프로젝트는 min_version 을 1.14.0 이상으로 둔다(낮추지는 않는다). 선언은 권한이 아니라 훅의 믿음과 상관없다."""
+    from . import outside
+    from .paths import file_lock, _atomic_json
+
+    declare, undeclare = dict(declare or {}), list(undeclare or ())
+    if not declare and not undeclare:
+        raise ConfigError("folders: 더할 이름이나 지울 이름을 적는다")
+    with file_lock(paths.state_dir / "gaf.json"):
+        try:
+            supplied = _read(paths) if paths.config.exists() else {}
+        except (OSError, ValueError, RecursionError) as exc:
+            raise ConfigError("gaf.json: 설정 JSON을 읽을 수 없어 이름을 바꾸지 않았다") from exc
+        _validate(supplied, DEFAULTS, "")
+        folders = validate_folders(supplied.get("folders", {}))
+        validate_folders(declare)
+        known = {outside.name_key(name) for name in folders}
+        missing = [name for name in undeclare if not isinstance(name, str) or outside.name_key(name) not in known]
+        if missing:
+            raise ConfigError(f"folders: 선언에 없는 이름이다: {', '.join(str(name) for name in missing)}")
+        gone, fresh = {outside.name_key(name) for name in undeclare}, {outside.name_key(name) for name in declare}
+        if gone & fresh:
+            raise ConfigError("folders: 같은 이름을 더하면서 지울 수 없다")
+        updated = {name: about for name, about in folders.items() if outside.name_key(name) not in gone | fresh}
+        updated.update(declare)
+        validate_folders(updated)
+        if updated:
+            supplied["folders"] = updated
+        else:
+            supplied.pop("folders", None)
+        current = supplied.get("min_version", "")
+        if declare and not (isinstance(current, str) and _VERSION.fullmatch(current) and _version(current) >= _version(FOLDERS_SINCE)):
+            supplied["min_version"] = FOLDERS_SINCE
+        check_min_version(supplied.get("min_version", ""))       # 적은 뒤 이 프로그램이 못 여는 파일을 만들지 않는다
+        _atomic_json(paths.config, supplied)
+        return load_config(paths)
 
 
 def change_review(paths: Paths, kind: str, rule: dict) -> tuple[Config, bool]:

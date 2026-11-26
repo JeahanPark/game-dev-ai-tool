@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -82,6 +82,9 @@ class Role:
     body: str
     meta: dict
     fallback: dict | None = None
+    # 프로젝트 밖 폴더의 이름 참조(1.14.0) — write 목록 안의 객체 `{"folder": 이름, "glob": 글롭}`. write(글 목록)와 따로 둔다:
+    # 지휘자가 이 PC 의 짝으로 풀어 절대 글롭으로 write 에 붙인다(gaf/outside.py). 꼴의 검사는 풀 때 한다 — 잘못 적은 줄 하나로 역할이 사라지지 않게.
+    refs: list = field(default_factory=list)
 
     @property
     def handoff_path(self) -> Path:
@@ -183,8 +186,9 @@ def load_role(paths: Paths, config: Config, name: str) -> Role:
         value = meta.get(key, None if key == "skills" else [])
         if key == "skills" and value is None:
             continue
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            raise RoleError(f"{name}의 {key}: 글 목록이어야 한다")
+        if not isinstance(value, list) or not all(isinstance(item, str) or (key == "write" and isinstance(item, dict)) for item in value):
+            raise RoleError(f"{name}의 {key}: 글 목록이어야 한다" + ('(프로젝트 밖 폴더의 이름은 {"folder": "이름", "glob": "하위/**"} 객체로 적는다)'
+                                                                if key == "write" else ""))
     for key in ("peers", "off"):
         if type(meta.get(key, False)) is not bool:
             raise RoleError(f"{name}의 {key}: true 또는 false여야 한다")
@@ -193,14 +197,15 @@ def load_role(paths: Paths, config: Config, name: str) -> Role:
     session = meta.get("session", "auto")
     if session not in ("auto", "fresh", "keep"):
         raise RoleError(f"{name}의 session: auto, fresh, keep 가운데 하나여야 한다")
-    write = list(meta.get("write", []))
+    write = [item for item in meta.get("write", []) if isinstance(item, str)]
+    refs = [dict(item) for item in meta.get("write", []) if isinstance(item, dict)]      # 프로젝트 밖 폴더의 이름 참조(1.14.0)
     own = f"team/{name}/**"
     if own not in write:
         write.append(own)
     return Role(name=name, dir=directory, **values, write=write, skills=meta.get("skills"),
                 plugins=list(meta.get("plugins", [])), mcp=meta.get("mcp"), session=session,
                 peers=meta.get("peers", False), off=meta.get("off", False),
-                lead=name == config.lead_role, body=body, meta=meta, fallback=meta.get("fallback"))
+                lead=name == config.lead_role, body=body, meta=meta, fallback=meta.get("fallback"), refs=refs)
 
 
 def _role_folders(paths: Paths) -> list[Path]:
@@ -263,8 +268,8 @@ def create_role(paths: Paths, config: Config, name: str, *, duty="", engine=None
                 + f"<!-- 역할 서랍 roles/{template} 에서 꺼냄 · 출처와 라이선스: 프레임워크의 gaf/library/NOTICE.md -->\n")
     # 잘못된 목록 등은 폴더를 만들기 전에 확인한다.
     meta, _ = parse_role_text(text)
-    if not isinstance(meta.get("write"), list) or not all(isinstance(p, str) for p in meta["write"]):
-        raise RoleError("write: 글 목록이어야 한다")
+    if not isinstance(meta.get("write"), list) or not all(isinstance(p, (str, dict)) for p in meta["write"]):
+        raise RoleError('write: 글 목록이어야 한다(프로젝트 밖 폴더의 이름은 {"folder": "이름", "glob": "하위/**"} 객체로 적는다)')
     try:
         directory.mkdir(parents=True, exist_ok=False)
     except FileExistsError as exc:
