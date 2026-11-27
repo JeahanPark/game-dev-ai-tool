@@ -18,10 +18,25 @@ ALWAYS_DENY = (".git/**", ".gaf/**", ".claude/**", "**/.env*", "CLAUDE.md", "AGE
 # 값은 프로젝트 밖의 폴더(paths.run_dir)에 있다 — 뿌리를 뒤지는 도구가 읽어 오지 않게(11-12 QA 결함-21). 프로젝트 안의
 # .gaf/server.json 은 읽기 도구도 막는다. Grep · Glob 은 .gaf 폴더와 글롭도, 셸은 bin · uploads 밖의 .gaf 경로도 막는다.
 # 같은 PC · 같은 계정의 프로세스라 끝까지 막지는 못한다(실수로 읽는 것을 막는 문이다 — 설계 §7).
+# `.gaf/rea/<역할>/` 는 REA 작업 폴더다(1.17.0) — 긴 결과의 온 것 · 꺼낸 파일 · 증거 묶음이 있다. **REA 를 쥔 그 역할의 세션만 제 폴더를**
+# 읽는다(셸로 파일을 읽는 엔진(Codex)의 역할도 나눠 읽게 셸에도 연다). 다른 역할에게는 닫혀 있다 — 꺼낸 게임의 코드 · 글을 뜯어보기를
+# 맡지 않은 역할이 읽어 제 일에 옮기지 못하게(11-27 다른 눈의 검수). 쓰는 것은 누구도 못 한다(ALWAYS_DENY 의 `.gaf/**` — Write · Edit).
+# 셸의 문은 이름만 보므로 셸로 쓰는 것까지 막지는 못한다 — 그래서 증거 묶음은 지휘자가 적어 둔 지문과 견준다(gaf/rea/host.py).
 SECRET_FILE = ".gaf/server.json"
-_GAF_IN_COMMAND = re.compile(r"\.gaf[\\/]+(?!(?:bin|uploads)(?:[\\/]|\b))", re.IGNORECASE)
+STATE_OPEN = ("bin", "uploads")                   # 지휘자 폴더에서 모든 세션이 읽어도 되는 자리
+REA_FOLDER = "rea"                                # 그 아래의 `<역할>/` 은 REA 를 쥔 그 역할의 세션만 읽는다
 _SECRET_IN_COMMAND = re.compile(r"server\.json", re.IGNORECASE)
 _NAME_END = r"(?![\w.\-])"                        # 이름이 더 이어지지 않는 자리(`…/gaf-old` · `…/run.py` 는 다른 이름이다)
+
+
+@lru_cache(maxsize=64)
+def _gaf_in_command(rea: str | None) -> re.Pattern:
+    """셸 명령 글에서 지휘자 폴더의 닫힌 자리를 가리키는 꼴 — `bin` · `uploads` 와(REA 를 쥔 역할이면) `rea/<그 역할>` 은 뺀다.
+    이름이 더 이어지면(`.gaf/bin-x` · `.gaf/rea/분석가`) 다른 자리다."""
+    opened = [re.escape(name) for name in STATE_OPEN]
+    if rea:
+        opened.append(REA_FOLDER + r"[\\/]+" + re.escape(rea))
+    return re.compile(r"\.gaf[\\/]+(?!(?:" + "|".join(opened) + r")(?:[\\/]|" + _NAME_END + r"))", re.IGNORECASE)
 # 모르는 부분이 든 낱말은 기본 자리의 이름으로도 알아본다: `…/gaf/run` 과, 바로 윗폴더의 알려진 자리
 # (`AppData/Local/gaf` · `%LOCALAPPDATA%\gaf` · `.local/state/gaf`). 다 풀린 낱말은 _names_run_folder 가 경로로 견준다.
 _RUN_IN_COMMAND = re.compile(rf"[\\/]gaf[\\/]+run{_NAME_END}", re.IGNORECASE)
@@ -37,6 +52,13 @@ SESSION_REASON = "세션의 표(GAF_SESSION)를 읽거나 지우거나 바꾸는
 _RESEARCH_CONSENT = re.compile(r"gaf\.research[\s\S]{0,80}consent"
                                r"|\bgaf\b[\s\S]{0,20}\bresearch\s+(?:allow|deny)\b", re.IGNORECASE)
 RESEARCH_REASON = "레퍼런스 조사의 출처를 켜고 끄는 것은 사람이 한다(화면의 승인 카드 · 사람의 터미널) — 세션은 조사를 청하기만 한다"
+# REA(게임 빌드를 뜯어보는 분석 도구 — 1.17.0)를 이 PC 에 깔고 켜는 것도 사람이 한다 — 같은 꼴로 이름만 본다.
+# 따옴표로 싼 꼴(`gaf "rea" on`)과 명령줄 함수를 바로 부르는 꼴(`from gaf.cli import _rea; _rea(…)`)도 본다(11-27 다른 눈의 검수) —
+# 하는 쪽(gaf/rea/state.py 의 human_only)도 세션이 띄운 프로세스면 거절한다.
+_REA_SWITCH = re.compile(r"gaf\.rea[\s\S]{0,80}(?:state|setup|enable|install)"
+                         r"|\bgaf\b[\s\S]{0,20}\brea\b[\"']?\s+[\"']?(?:on|off)\b"
+                         r"|\b_rea\s*\(", re.IGNORECASE)
+REA_REASON = "REA 를 이 PC 에 깔고 켜고 끄는 것은 사람이 한다(화면의 승인 카드 · 사람의 터미널) — 세션은 rea_tools · rea_call 로 쓰기만 한다"
 # PC 를 사설망 · 인터넷에 여는 일(Tailscale 의 serve · funnel · 설정)은 사람이 한다(11-16 공개 길) — 세션이 스스로 넘김을 걸면
 # 등록한 기기만 들이는 문은 그대로여도, 공개 문의 따로 둔 한도를 비켜 지휘자의 본 포트가 인터넷에 놓인다.
 # 읽기만 하는 것(`tailscale status` · `ip` · `version`)은 그대로 둔다. 알아볼 수 있는 꼴만 막는다(스크립트 속의 호출은 못 막는다).
@@ -270,6 +292,9 @@ def _can_write_place(full: str, globs, base: Path, *, library_raw=False) -> tupl
     # 하나로 등록한 기기 목록 · 훅 믿음 · 프로젝트 밖 쓰기의 승인을 세션이 고칠 수 있었다. 글자로도 파일 번호로도 견준다(_reaches).
     if _reaches(full, _run_place(), search=False):
         return False, "늘 막는 곳이다: 접근 값 폴더(등록한 기기 · 믿음 · 승인을 두는 곳 — 사람만 고친다)"
+    # 이 프로그램이 받아 둔 도구(REA · 그 Node — 1.17.0)는 지휘자가 샌드박스 밖에서 돌린다 — 세션이 고칠 수 있으면 무엇이든 돌리게 된다.
+    if _reaches(full, _canon(user_dir() / "tools", base), search=False):
+        return False, "늘 막는 곳이다: 이 프로그램이 받아 둔 도구의 자리(~/.gaf/tools — 지휘자가 돌리는 프로그램이다)"
     inside, relative = _under(full, base)
     # 절대 경로 비교에도 정리된 전체 경로를 쓴다.
     absolute = (base / relative).resolve().as_posix() if inside else relative
@@ -786,16 +811,25 @@ def _names_custom(text: str, root) -> bool:
     return False
 
 
-def _state_glob(pattern: str) -> bool:
-    """-g 로 .ignore 를 넘는 지휘자 폴더 글롭인가. 그림과 실행 부품은 그대로 읽는다."""
+def _state_glob(pattern: str, rea: str | None = None) -> bool:
+    """-g 로 .ignore 를 넘는 지휘자 폴더 글롭인가. 그림 · 실행 부품과(REA 를 쥔 역할이면) 제 REA 작업 폴더는 그대로 읽는다."""
     # 11-12 QA 관찰: ripgrep 의 -g 가 .gaf/.ignore 보다 앞서서 기록을 읽는다.
     parts = pattern.replace("\\", "/").casefold().split("/")
-    return any(part == ".gaf" and (index + 1 == len(parts) or parts[index + 1] not in ("bin", "uploads"))
-               for index, part in enumerate(parts))
+    for index, part in enumerate(parts):
+        if part != ".gaf":
+            continue
+        rest = parts[index + 1:]
+        if rest and rest[0] in STATE_OPEN:
+            continue
+        if rea and len(rest) >= 2 and rest[0] == REA_FOLDER and rest[1] == rea.casefold():
+            continue                                  # 제 폴더를 이름으로 가리킨 글롭만(`.gaf/rea/**` · `.gaf/rea/*/…` 는 남의 것도 건드린다)
+        return True
+    return False
 
 
-def reads_secret(tool_name, tool_input, root) -> bool:
-    """읽기 도구 · 셸 명령이 접근 값 파일 · 지휘자 폴더를 가리키는가(알아볼 수 있는 모양만 본다)."""
+def reads_secret(tool_name, tool_input, root, rea: str | None = None) -> bool:
+    """읽기 도구 · 셸 명령이 접근 값 파일 · 지휘자 폴더를 가리키는가(알아볼 수 있는 모양만 본다). rea 는 이 세션의 역할이 REA 를
+    쥐었을 때의 그 역할 이름 — 그 역할은 제 REA 작업 폴더(`.gaf/rea/<역할>/`)를 읽는다. 다른 세션에게 그 폴더들은 닫혀 있다."""
     if tool_name in ("Read", "Grep", "Glob"):
         search = tool_name != "Read"
         values = [value for value in (tool_input.get(key) for key in ("file_path", "path"))
@@ -804,20 +838,25 @@ def reads_secret(tool_name, tool_input, root) -> bool:
             values = ["."]                       # 뒤지는 도구는 경로를 안 주면 작업 폴더(뿌리)를 뒤진다 — 뿌리가 접근 값 폴더를 품었으면 막는다
         base = _root(root)
         run, state, secret = _run_place(), _canon(".gaf", base), _canon(SECRET_FILE, base)
+        works = _canon(f".gaf/{REA_FOLDER}", base)
+        own = _canon(f".gaf/{REA_FOLDER}/{rea}", base) if rea else None
         for value in values:
             for full in _readings(value, base):
                 if (_reaches(full, run, search=search) or _same_place(full, secret)
                         or _reaches(full, _canon(".gaf/지시문", base), search=False)
                         or (search and _same_place(full, state))):
                     return True
+                # REA 작업 폴더들: 제 것(`rea/<이 역할>/`) 안만 읽는다 — 다른 역할의 것과 그 윗폴더는 닫혀 있다(1.17.0)
+                if _reaches(full, works, search=False) and not (own and _reaches(full, own, search=False)):
+                    return True
         glob = tool_input.get("glob") if tool_name == "Grep" else tool_input.get("pattern") if tool_name == "Glob" else None
-        return isinstance(glob, str) and bool(_SECRET_IN_COMMAND.search(glob) or _state_glob(glob)
+        return isinstance(glob, str) and bool(_SECRET_IN_COMMAND.search(glob) or _state_glob(glob, rea)
                                               or _names_run_folder(glob, root))
     if tool_name in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
         if tool_name == "Bash":
             command = command_part(command)
-        return bool(_GAF_IN_COMMAND.search(command) or _names_run_folder(command, root)
+        return bool(_gaf_in_command(rea or None).search(command) or _names_run_folder(command, root)
                     or (_SECRET_IN_COMMAND.search(command) and ".gaf" in command.casefold()))
     return False
 
@@ -884,7 +923,8 @@ def hook_checks(tool_name, tool_input, cwd) -> list[tuple[str, dict]]:
     return [(shell, {"command": "\n".join(texts)})] if texts else []
 
 
-def check_tool(tool_name, tool_input, *, write, root, bash_deny) -> tuple[bool, str]:
+def check_tool(tool_name, tool_input, *, write, root, bash_deny, rea: str | None = None) -> tuple[bool, str]:
+    """세션의 도구 하나를 들일지 본다. rea 는 이 세션의 역할이 REA 를 쥐었을 때의 그 역할 이름(지휘자가 넘긴다 — 제 REA 작업 폴더를 읽게)."""
     if tool_denied(tool_name):
         return False, TOOLS_REASON
     if _background(tool_input):
@@ -901,7 +941,7 @@ def check_tool(tool_name, tool_input, *, write, root, bash_deny) -> tuple[bool, 
         if not texts:
             return True, ""
         tool_name, tool_input = "Bash", {"command": "\n".join(texts)}
-    if reads_secret(tool_name, tool_input, root):
+    if reads_secret(tool_name, tool_input, root, rea):
         return False, SECRET_REASON
     if tool_name in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
@@ -913,6 +953,8 @@ def check_tool(tool_name, tool_input, *, write, root, bash_deny) -> tuple[bool, 
             return False, SESSION_REASON
         if _RESEARCH_CONSENT.search(command):
             return False, RESEARCH_REASON
+        if _REA_SWITCH.search(command):
+            return False, REA_REASON
         if _TAILNET_COMMAND.search(command):
             return False, TAILNET_REASON
         pattern = bash_denied(command, bash_deny)

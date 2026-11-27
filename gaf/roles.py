@@ -85,6 +85,9 @@ class Role:
     # 프로젝트 밖 폴더의 이름 참조(1.14.0) — write 목록 안의 객체 `{"folder": 이름, "glob": 글롭}`. write(글 목록)와 따로 둔다:
     # 지휘자가 이 PC 의 짝으로 풀어 절대 글롭으로 write 에 붙인다(gaf/outside.py). 꼴의 검사는 풀 때 한다 — 잘못 적은 줄 하나로 역할이 사라지지 않게.
     refs: list = field(default_factory=list)
+    # REA(게임 빌드를 뜯어보는 분석 도구 — 1.17.0)를 이 역할의 세션에만 내어 준다: 머리말의 `rea: true`. 지휘자가 REA 를 쥐고
+    # 이 역할에게 도구 둘(rea_tools · rea_call)을 붙인다(gaf/rea/host.py). 총괄에게는 붙지 않는다.
+    rea: bool = False
 
     @property
     def handoff_path(self) -> Path:
@@ -189,7 +192,7 @@ def load_role(paths: Paths, config: Config, name: str) -> Role:
         if not isinstance(value, list) or not all(isinstance(item, str) or (key == "write" and isinstance(item, dict)) for item in value):
             raise RoleError(f"{name}의 {key}: 글 목록이어야 한다" + ('(프로젝트 밖 폴더의 이름은 {"folder": "이름", "glob": "하위/**"} 객체로 적는다)'
                                                                 if key == "write" else ""))
-    for key in ("peers", "off"):
+    for key in ("peers", "off", "rea"):
         if type(meta.get(key, False)) is not bool:
             raise RoleError(f"{name}의 {key}: true 또는 false여야 한다")
     if meta.get("mcp") is not None and not isinstance(meta["mcp"], str):
@@ -205,7 +208,8 @@ def load_role(paths: Paths, config: Config, name: str) -> Role:
     return Role(name=name, dir=directory, **values, write=write, skills=meta.get("skills"),
                 plugins=list(meta.get("plugins", [])), mcp=meta.get("mcp"), session=session,
                 peers=meta.get("peers", False), off=meta.get("off", False),
-                lead=name == config.lead_role, body=body, meta=meta, fallback=meta.get("fallback"), refs=refs)
+                lead=name == config.lead_role, body=body, meta=meta, fallback=meta.get("fallback"), refs=refs,
+                rea=meta.get("rea", False))
 
 
 def _role_folders(paths: Paths) -> list[Path]:
@@ -226,6 +230,9 @@ def has_roles(paths: Paths) -> bool:
 
 def load_roles(paths: Paths, config: Config) -> dict[str, Role]:
     return {folder.name: load_role(paths, config, folder.name) for folder in _role_folders(paths)}
+
+
+REA_TEMPLATE = "reverse-engineer"      # 서랍의 역할 글 「역분석가」 — 이 글로 만든 역할에만 REA 가 붙는다
 
 
 def create_role(paths: Paths, config: Config, name: str, *, duty="", engine=None, model=None,
@@ -263,6 +270,9 @@ def create_role(paths: Paths, config: Config, name: str, *, duty="", engine=None
             raise RoleError(f"{exc} · python -m gaf library list --kind roles 로 찾는다") from exc
         header_end = _header_end(text.splitlines(keepends=True))
         header = "".join(text.splitlines(keepends=True)[:header_end + 1])
+        if template == REA_TEMPLATE:              # 서랍의 역분석가 — REA 를 이 역할의 세션에 내어 준다
+            before, closing = header.rstrip("\n").rsplit("\n", 1)
+            header = f"{before}\nrea: true\n{closing}\n"
         text = (header + f"# {name}\n\n" + (f"{duty}\n\n" if duty else "") + body.strip("\n") + "\n\n"
                 + render_template(base[base.index("## 일하는 법"):], **values).rstrip() + "\n\n"
                 + f"<!-- 역할 서랍 roles/{template} 에서 꺼냄 · 출처와 라이선스: 프레임워크의 gaf/library/NOTICE.md -->\n")

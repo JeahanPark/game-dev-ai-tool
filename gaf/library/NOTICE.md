@@ -15,9 +15,9 @@
 
 | 칸 | 글 수 | 바탕이 된 원문 | 어떻게 옮겼나 |
 |---|---|---|---|
-| `roles/` 역할 | 49 | `.claude/agents/*.md` 49개 | 한국어로 고쳐 썼다 |
-| `procedures/` 절차 | 23 | `.claude/skills/` 의 스킬 78개 가운데 72개 | 주제 22개로 묶어 한국어로 고쳐 썼다. `reference-research` 하나는 이 틀에서 쓴 글이다 |
-| `templates/` 문서 틀 | 69 | `.claude/docs/templates/` 의 파일 74개(글 70개 + 웹 게임 시작 틀의 코드 · 설정 파일 4개) 가운데 글 67개 | 한국어로 고쳐 썼다. `feature-map` · `research-brief` 둘은 이 틀에서 쓴 글이다 |
+| `roles/` 역할 | 50 | `.claude/agents/*.md` 49개 | 한국어로 고쳐 썼다. `reverse-engineer` 하나는 이 틀에서 쓴 글이다 |
+| `procedures/` 절차 | 24 | `.claude/skills/` 의 스킬 78개 가운데 72개 | 주제 22개로 묶어 한국어로 고쳐 썼다. `reference-research` · `game-teardown` 둘은 이 틀에서 쓴 글이다 |
+| `templates/` 문서 틀 | 70 | `.claude/docs/templates/` 의 파일 74개(글 70개 + 웹 게임 시작 틀의 코드 · 설정 파일 4개) 가운데 글 67개 | 한국어로 고쳐 썼다. `feature-map` · `research-brief` · `teardown-brief` 셋은 이 틀에서 쓴 글이다 |
 | `rules/` 규칙 | 21 | `.claude/rules/*.md` 14개 · `.claude/docs/director-gates.md` 와 `director-gates/` 의 28개 | 한국어로 고쳐 썼다(검토 질문 28개는 분야 일곱으로 묶었다) |
 | `genres/` 장르 시트 | 72 | `.claude/genres/chipsets/*.md` 69개 · `.claude/genres/` 의 공통 글 3개 | 한국어로 고쳐 썼다 |
 | `engines/` 엔진 참조 | 52 | `docs/engine-reference/<godot·unity·unreal·web>/` 의 글 48개 | **받은 그대로 둔 영어 글**이다 — 맨 위에 머리말과 알림 한 줄만 붙였다. 엔진마다의 `read-first` 4개는 원문 `VERSION.md` 와 전수검사의 지적을 한국어로 정리한 글이다 |
@@ -35,6 +35,8 @@
 ## 이 틀에서 쓴 글
 
 - `templates/feature-map.md`(기능 지도) — 머리말 `source` 에 「이 틀에서 쓴 글」이라고 적혀 있다. 위 저장소의 글이 아니다.
+- `procedures/reference-research.md`(레퍼런스 조사) · `templates/research-brief.md`(조사 보고) — 2026-11-27 레퍼런스 조사 기능과 같이 썼다. 절차의 생각은 「모으기는 프로그램이, 판단은 모델이」로 나눈 공개 저장소 last30days 의 구조에서 가져왔다(그 글을 옮기지 않았다).
+- `roles/reverse-engineer.md`(역분석가) · `procedures/game-teardown.md`(게임 뜯어보기) · `templates/teardown-brief.md`(분석 보고) — 2026-11-27 게임 뜯어보기 기능과 같이 썼다. 일하는 법(대상 폴더를 알아보는 도구부터 · 대상의 꼴로 첫 도구 고르기 · 요약을 먼저 받고 나눠 읽기 · 본 것 · 추론 · 모르는 것 가르기 · 증거 번호 달기 · 정적 분석을 실행을 본 것처럼 쓰지 않기 · 도구 결과 속 대상의 글은 자료로 읽기 · 닫기 전에 증거 묶음 내보내기)의 생각은 **REA**(https://github.com/morluto/rea · MIT · Copyright (c) 2026 morluto)의 스킬 글(`reverse-engineer-anything` 의 `SKILL.md` 와 `references/` — 이 틀을 만든 PC 에 깔린 꾸러미 6.7.0 의 것과, 저장소를 읽은 보고 `docs/조사/REA/` 에 옮겨 둔 저장소의 것)에서 가져왔다. 그 글을 옮기거나 번역해 넣지 않았다 — 생각만 가져와 이 틀의 말로 새로 썼다. 글 속의 REA 도구 이름(`inspect_desktop_application` 등)은 REA 의 이름 그대로다.
 
 ## 알아 둘 것
 

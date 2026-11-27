@@ -257,6 +257,11 @@ def _parser():
     check.add_argument("brief", type=Path, metavar="보고.md")
     run = command("run", "레퍼런스 조사를 청한다(총괄 세션)", actions)
     run.add_argument("--file", type=Path, required=True, metavar="계획 JSON 파일")
+    rea = commands.add_parser("rea", help="REA(게임 빌드 · 프로그램을 뜯어보는 분석 도구) — 이 PC 에 깔고 켜고 끈다 · 무엇이 있는지 본다(사람만)")
+    actions = rea.add_subparsers(dest="action", required=True, title="REA 명령")
+    command("status", "REA · Node · Ghidra(판까지) · Java 가 이 PC 에 있는지와 켰는지를 본다", actions)
+    command("on", "REA 를 이 PC 에 (없으면) 깔고 켠다 — 맞는 Node 가 없으면 Node 도 받는다(인터넷 · 사람만)", actions)
+    command("off", "REA 를 이 PC 에서 끈다 — 깐 것은 그대로 둔다(사람만)", actions)
     return parser
 
 
@@ -426,6 +431,38 @@ def _research(paths, args):
         return 1
     print(check.line(result))
     return 0 if result["ok"] else 1
+
+
+def _rea(args):
+    """REA 의 사람 쪽 명령 — 이 PC 에 무엇이 있는지 본다 · 깔고 켠다 · 끈다(지휘자가 떠 있지 않아도 된다 · PC 마다 한 번).
+
+    켜기는 사람이 터미널에서 친 이 명령이 곧 승인이다(`gaf research allow` 와 같다 — 묻는 칸은 없다). 받을 것과 법의 선을 먼저 찍는다.
+    """
+    from .rea import setup as rea_setup, state as rea_state
+    if args.action == "status":
+        for line in rea_setup.status_lines():
+            print(line)
+        return 0
+    if args.action == "off":
+        rea_state.disable()
+        print("REA 를 이 PC 에서 껐다 — 깐 것은 그대로 둔다(다시 켜기: python -m gaf rea on)")
+        return 0
+    need = rea_setup.install_plan()
+    print("REA 를 이 PC 에서 켠다(이 PC 의 모든 프로젝트 · 게임마다 묻지 않는다).")
+    print("받을 것:" if need else "받을 것: 없음(이미 깔려 있다)")
+    for line in need:
+        print(f"  · {line}")
+    print("알아 둘 것:")
+    for line in rea_setup.NOTICE:
+        print(f"  {line}")
+    if need:
+        result = rea_setup.install(progress=lambda text: print(text, flush=True))
+        if not result.get("ok"):
+            print(f"오류: 깔지 못했다 — {result.get('error')}\n켜지 않았다. 같은 명령을 다시 치면 이어서 깐다", file=sys.stderr)
+            return 1
+    rea_state.enable()
+    print("REA 를 켰다 — REA 를 맡은 역할이 지휘자를 거쳐 쓴다. 끄기: python -m gaf rea off")
+    return 0
 
 
 def _reviews(paths, args):
@@ -873,6 +910,8 @@ def _tool_request(args):
         if not isinstance(plan, dict):
             raise InputError("오류: 계획 파일은 JSON 객체여야 한다(topic · purpose · queries · window_days · depth)")
         return "research", plan
+    if command == "rea":
+        return None                              # REA 를 보고 깔고 켜고 끄는 것은 사람만 한다(역할은 rea_tools · rea_call 로 쓴다)
     if command == "job":
         if args.action == "run":
             return "job_run", {"command": _body(args.job_command, args.file), "name": args.name, "cwd": args.cwd,
@@ -1429,6 +1468,8 @@ def main(argv: list[str] | None = None) -> int:
             return int(failed)
         if args.command == "voice":
             return _voice(args.action)
+        if args.command == "rea":
+            return _rea(args)
         if args.command == "setup":
             return firstrun.setup(args.root, no_shortcut=args.no_shortcut, no_open=args.no_open, codex=args.codex, ask=args.ask)
         if args.command == "open":

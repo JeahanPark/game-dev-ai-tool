@@ -240,6 +240,22 @@ def _conductor(paths: Paths) -> Check:
     return Check("지휘자", "skip", "꺼져 있다")
 
 
+def _rea(run, which) -> list[Check]:
+    """REA(고를 것 · PC 마다) — 알려 주기만 하는 줄이다. 없어도 「안 됨」으로 세지 않는다. 켠 적도 깐 적도 없으면 한 줄만 싣는다."""
+    try:
+        from .rea import setup as rea_setup
+
+        # 기본 찾기(shutil.which)는 Windows 에서 지금 폴더를 PATH 보다 먼저 본다 — REA 줄은 setup 의 찾기(PATH 의 온전한 폴더에서만)를
+        # 쓴다(11-27 다른 눈의 검수). 시험이 갈아 끼운 찾기는 그대로 넘긴다.
+        data = rea_setup.status(run=run, which=None if which is shutil.which else which)
+        rows = rea_setup.status_rows(data)
+    except Exception:  # noqa: BLE001 — 알려 주기만 하는 줄이 점검 전체를 멈추게 하지 않는다
+        return [Check("REA", "skip", "보지 못했다")]
+    if not data.get("enabled") and not (data.get("rea") or {}).get("installed"):
+        rows = rows[:1]
+    return [Check(name if name == "REA" else f"REA · {name}", "ok" if ready else "skip", text) for name, ready, text in rows]
+
+
 def checks(paths: Paths | None = None, *, run=subprocess.run, which=shutil.which,
            find_spec=importlib.util.find_spec, version=importlib.metadata.version, python=None) -> list[Check]:
     results = [_python(python)]
@@ -258,6 +274,7 @@ def checks(paths: Paths | None = None, *, run=subprocess.run, which=shutil.which
     if paths is not None:
         results.append(_hooks(paths))
         results.append(_conductor(paths))
+    results += _rea(run, which)
     return results
 
 

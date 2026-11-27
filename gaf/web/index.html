@@ -939,7 +939,7 @@ function actionCard(decision) {
   const action = decision.action, commit = action.kind === 'commit', card = node('div', null, 'decision-card action-card');
   const check = action.kind === 'check_add' || action.kind === 'check_remove';
   const review = action.kind === 'review_add' || action.kind === 'review_remove';
-  const head = action.kind === 'custom' ? 'Custom 청' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청'
+  const head = action.title ? action.title : action.kind === 'custom' ? 'Custom 청' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청'
     : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청' : commit ? '커밋 청'
     : action.kind === 'research' ? '레퍼런스 조사 청' : '푸시 청';
   card.append(node('strong', head + ' · ' + decision.from));
@@ -968,6 +968,9 @@ function actionCard(decision) {
     for (const s of action.sources) list.append(node('p', s.label + ' — ' + s.how),
       node('p', '보내는 것: ' + (action.sent[s.name] || []).join(' · ')), node('small', '약관: ' + s.terms + (s.missing ? ' · 승인하면 깐다: ' + s.needs : '')));
     card.append(list);
+  } else if (action.lines) {
+    // 글 줄만 싣는 승인 카드(1.17.0 — REA 켜기 · REA 도구): 제목은 action.title
+    for (const line of action.lines) card.append(node('p', line));
   } else if (commit) {
     const counts = action.counts, words = {new:'새', modified:'고침', deleted:'지움'};
     const total = counts.new + counts.modified + counts.deleted;

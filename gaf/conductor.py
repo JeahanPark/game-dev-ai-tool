@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -47,6 +48,7 @@ from .research import consent as research_consent
 from .research import plan as research_plan
 from .research import sources as research_sources
 from .research.evidence import STATUS_WORDS as RESEARCH_STATUS_WORDS
+from .rea import host as rea_host
 from .roles import Role, RoleError
 from .store import Store
 
@@ -85,7 +87,7 @@ CUSTOM_LABELS = {"all": "전체 프로젝트", "project": "이 프로젝트", "r
 # 다시 뜨며 버린 승인 대기 청을 사람 · 총괄에게 알릴 때 붙이는 이름(11-23 사용자: 청이 말없이 사라졌다)
 ACTION_WORDS = {"commit": "커밋", "push": "푸시", "custom": "Custom", "check_add": "기본 검사 추가",
                 "check_remove": "기본 검사 제거", "review_add": "기본 검토 추가", "review_remove": "기본 검토 제거",
-                "research": "레퍼런스 조사"}
+                "research": "레퍼런스 조사", "rea": "REA 켜기", "rea_tool": "REA 도구 쓰기"}
 LOST_NOTICE = "lost-actions"
 KEPT_TEXTS = 20                         # state.json 에 남겨 다시 뜬 뒤에도 잇는 알림 글의 수(새것부터)
 ARTIFACT_KINDS = {".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image", ".webp": "image",
@@ -298,7 +300,7 @@ def git_status(root: Path) -> dict[str, str] | None:
 def _action_word(kind: str) -> str:
     return ("Custom 변경" if kind == "custom" else "기본 검사" if kind.startswith("check_") else
             "기본 검토" if kind.startswith("review_") else "커밋" if kind == "commit" else
-            "레퍼런스 조사" if kind == "research" else "푸시")
+            "레퍼런스 조사" if kind == "research" else "REA 켜기" if kind == "rea" else "REA 도구 쓰기" if kind == "rea_tool" else "푸시")
 
 
 class GitState(dict):
@@ -444,7 +446,7 @@ class _Worker:
     hook_timer: asyncio.TimerHandle | None = None
 
 
-class Conductor:
+class Conductor(rea_host.ReaHost):
     def __init__(self, paths: Paths, config: Config, store: Store, engines: dict[str, Engine], *,
                  clock=time.time, sleep=asyncio.sleep, tick_seconds: float | None = 60.0) -> None:
         self.paths, self.config, self.store = paths, config, store
@@ -596,6 +598,7 @@ class Conductor:
             w.halt.set()
             self._drop_decisions(w)
             w.wake.set()
+            self._rea_reap(w.name)               # 도는 REA 호출이 있으면 그 REA 를 내린다 — 기다리던 도구가 바로 돌아와 턴이 제때 끝난다
         await asyncio.gather(*(self._interrupt(w) for w in self._workers.values() if w.turning),
                              return_exceptions=True)
         runners = [w.runner for w in self._workers.values() if w.runner is not None]
@@ -612,6 +615,10 @@ class Conductor:
         for w in self._workers.values():
             await self._close_session(w, "shutdown")
             self._end_live(w)
+        # 남은 REA(분석 도구의 자식 프로세스)를 내리고 앞서 걸어 둔 내리기까지 기다린다 — 턴 · 세션을 다 닫은 뒤에 한다. 먼저 하면
+        # 기다리던 도구에 취소가 새고, 그 뒤에 늦게 뜬 REA 가 주인 없이 남았다(11-27 다른 눈의 검수).
+        with contextlib.suppress(Exception):
+            await self._rea_close_all()
         for task in list(self._side):
             task.cancel()
         if self._flusher is not None:
@@ -1618,6 +1625,9 @@ class Conductor:
             w.stop_requested, w.stopped_by = True, by
             w.halt.set()
             self._drop_decisions(w)
+        # 도는 REA 호출이 있으면 그 REA 를 내린다(나무째 · 기다림 없이) — REA 는 취소 알림을 무시해, 버려 두면 사람이 멈춘 뒤에도
+        # 승인받은 호출까지 돌았다(11-27 다른 눈의 검수). REA 를 쓰지 않는 역할에서는 아무것도 하지 않는다.
+        self._rea_reap(w.name)
         return dropped
 
     async def _halt_finish(self, w: _Worker, was_busy: bool) -> None:
@@ -2172,6 +2182,20 @@ class Conductor:
         result = self._research_card(sender, plan, missing)
         return {**result, "waiting": "approval"} if result.get("ok") else result
 
+    async def _follow_ups(self, w: _Worker, letter: Letter, record: dict, out: _Outcome) -> _Outcome:
+        """일의 턴 뒤에 지휘자가 이어 주는 것들 — 레퍼런스 조사(1.16.0)와 REA 의 승인(1.17.0 · gaf/rea/host.py). 그 턴에서 청한 것이
+        없으면 바로 돌아온다. 이어 부른 턴에서 또 청하면 다시 돈다(조사는 한 일에 두 번 · REA 의 물음은 여섯 번까지)."""
+        try:
+            for _ in range(RESEARCH_PER_TASK + rea_host.ASKS_PER_TASK + 1):
+                out = await self._research_rounds(w, letter, record, out)
+                if self._rea_session(w.name).pending is None or w.stop_requested or self._closing:
+                    break
+                out = await self._rea_round(w, letter, record, out)
+        finally:
+            self._rea_session(w.name).pending = None
+            w.research_open = False
+        return out
+
     async def _research_rounds(self, w: _Worker, letter: Letter, record: dict, out: _Outcome) -> _Outcome:
         """역할이 맡은 일의 턴에서 조사를 청했으면(도구 `research`) 그 조사를 돌리고, 끝나는 대로 같은 일을 이어서 부른다 — 검사 고리와
         같은 꼴이다. 역할의 턴은 기다리는 동안 열려 있지 않다(엔진의 도구 시간 제한에 걸리지 않는다 · 승인이 오래 걸려도 된다)."""
@@ -2192,6 +2216,9 @@ class Conductor:
                     break
                 rounds += 1
                 w.now = "레퍼런스 조사"
+                # 화면의 그 역할 줄에 무엇을 기다리는지 보이게 한다(검토를 기다릴 때와 같은 칸) — now 와 live 글은 턴 · 검사 중에만
+                # 실려서, 이 줄 전에는 「일하는 중」에 글이 비어 있었다(11-27 화면 탐침 · 1.17.0).
+                w.wait_reason = "레퍼런스 조사 — 승인 · 모으기를 기다린다"
                 self._begin_live(w, "check", "레퍼런스 조사 — 모으는 중")
                 self._talk(w, "system", text=f"지휘자: 레퍼런스 조사를 돌린다 — 「{_brief(plan.topic, 80)}」")
                 self._touch()
@@ -2203,7 +2230,7 @@ class Conductor:
                     note = await self._research_for_task(w, record, plan)
                 finally:
                     await self._review_resume(w)
-                    w.now = ""
+                    w.now, w.wait_reason = "", ""
                     self._end_live(w)
                 if self._closing:
                     w.stop_requested = True
@@ -2714,9 +2741,9 @@ class Conductor:
     def _request_action(self, sender, question, action) -> dict:
         waiting = [item for item in self._decisions.values() if item["future"] is None]
         same = next((item for item in waiting if item.get("action", {}).get("kind") == action["kind"]), None)
-        if action["kind"] == "research":
-            # 조사 청은 청한 이와 일이 같을 때만 한 카드다 — 역할의 일이 기다리는 카드를 다른 이의 청이 바꿔 치우면 그 일이 영영 기다린다.
-            same = next((item for item in waiting if item.get("action", {}).get("kind") == "research" and item["from"] == sender
+        if action["kind"] in ("research", "rea", "rea_tool"):
+            # 조사 · REA 청은 청한 이와 일이 같을 때만 한 카드다 — 역할의 일이 기다리는 카드를 다른 이의 청이 바꿔 치우면 그 일이 영영 기다린다.
+            same = next((item for item in waiting if item.get("action", {}).get("kind") == action["kind"] and item["from"] == sender
                          and item["action"].get("task") == action.get("task")), None)
         if action["kind"] == "custom":
             same = next((item for item in waiting if all(item.get("action", {}).get(key) == action[key]
@@ -2828,6 +2855,16 @@ class Conductor:
                         text = (f"출처 {' · '.join(names)} 는 켰으나{tool} 조사를 시작하지 못했다: {started['error']} — "
                                 "다시 청하면 묻지 않고 시작한다.")
                         result = {"sources": names, "error": started["error"]}
+            elif kind in ("rea", "rea_tool"):
+                # REA(1.17.0): 「켜기」는 이 PC 에 깔고 켠다(다음부터 묻지 않는다) · 「도구」는 그 일이 끝날 때까지 그 도구를 연다.
+                # 어느 쪽이든 기다리던 역할의 일이 이어 간다(gaf/rea/host.py `_rea_round`).
+                waiting = self._research_answers.get(decision["id"])
+                text = await self._rea_enable() if kind == "rea" else f"REA 도구 {action.get('tool')} 의 그 부름(받는 값 그대로)을 이 일에서 받게 했다."
+                if waiting is not None:
+                    waiting.update(done=True, approved=True)
+                text += (f" 역할 「{decision['from']}」의 일 {action.get('task')} 이 이어 간다." if waiting is not None else
+                         f" 역할 「{decision['from']}」의 일 {action.get('task')} 은 이미 끝났거나 멈췄다.")
+                result = {"task": action.get("task"), **({"tool": action["tool"]} if kind == "rea_tool" else {})}
             elif kind == "commit":
                 result = await asyncio.to_thread(commits.commit, self.paths.root, action["paths"], action["message"],
                                                  action["signature"], scratch=self.paths.state_dir)
@@ -2835,7 +2872,7 @@ class Conductor:
             else:
                 result = await asyncio.to_thread(commits.push, self.paths.root, action["signature"])
                 text = f"{result['branch']} 을 {result['upstream']} 에 올렸다(커밋 {result['count']}개)."
-        except (commits.CommitError, ConfigError) as exc:
+        except (commits.CommitError, ConfigError, rea_host.ReaSetupError) as exc:
             text = str(exc)
             result = {"error": text}
         except Exception as exc:  # noqa: BLE001 — 모르는 실패도 사람과 총괄에게 알린다.
@@ -2843,10 +2880,10 @@ class Conductor:
             result = {"error": text}
         finally:
             self._clear_notice(f"action:{decision['id']}")
-        if kind == "research" and action.get("task"):
+        if kind in ("research", "rea", "rea_tool") and action.get("task"):
             waiting = self._research_answers.get(decision["id"])
             if waiting is not None and not waiting["done"]:
-                # 켜다가 실패했다(허락 파일을 못 썼다 등) — 기다리던 역할의 일이 영영 서 있지 않게 깨운다(조사 없이 이어 간다).
+                # 켜다가 실패했다(허락 파일을 못 썼다 · REA 를 못 깔았다 등) — 기다리던 역할의 일이 영영 서 있지 않게 깨운다.
                 waiting.update(done=True, approved=False, failed=text)
         self.store.emit(kind, role=decision["from"], data=result)
         await self._action_say(head + "\n[지휘자가 한 일 — 사람의 말이 아니다] " + text)
@@ -2953,6 +2990,9 @@ class Conductor:
             import copy
             field = "check" if action["kind"].startswith("check_") else "review"
             return copy.deepcopy({key: action[key] for key in ("kind", field, "why")})
+        if action["kind"] in ("rea", "rea_tool"):
+            return {"kind": action["kind"], "title": action["title"], "lines": list(action["lines"]),
+                    **({"tool": action["tool"]} if action["kind"] == "rea_tool" else {})}
         if action["kind"] == "research":
             import copy
             plan = action["plan"]
@@ -3083,7 +3123,10 @@ class Conductor:
 
         role = self.roles.get(name)
         tools = lead_tools.build(self, name)
-        return tools if role is not None and role.lead else [tool for tool in tools if tool.name in ROLE_COMMANDS]
+        if role is not None and role.lead:
+            return [tool for tool in tools if tool.name not in rea_host.COMMANDS]      # REA 는 전용 역할의 세션에만 붙는다
+        allowed = ROLE_COMMANDS + (rea_host.COMMANDS if self.rea_role(name) else ())
+        return [tool for tool in tools if tool.name in allowed]
 
     async def command(self, name, args=None, *, token: str | None = None) -> dict:
         """총괄 명령 하나(`gaf team` · `gaf assign` …)를 돌린다 → {"ok", "text"}.
@@ -3130,7 +3173,8 @@ class Conductor:
         w = self._workers.get(owner) if owner else None
         if w is None:
             return False, GATE_UNKNOWN
-        allowed, reason = self._gate_check(w.session_write, tool_name, tool_input, cwd, w.session_deny, w.session_own)
+        allowed, reason = self._gate_check(w.session_write, tool_name, tool_input, cwd, w.session_deny, w.session_own,
+                                           w.name if self.rea_role(w.name) else None)
         if not allowed:
             self._gate_denied(w, tool_name, reason)
         return allowed, reason
@@ -3144,13 +3188,14 @@ class Conductor:
         if w is None:
             return False, GATE_UNKNOWN
         allowed, reason = await asyncio.to_thread(self._gate_check, w.session_write, tool_name, tool_input, cwd,
-                                                  w.session_deny, w.session_own)
+                                                  w.session_deny, w.session_own, w.name if self.rea_role(w.name) else None)
         if not allowed:
             self._gate_denied(w, tool_name, reason)
         return allowed, reason
 
-    def _gate_check(self, write, tool_name, tool_input, cwd, deny=(), own=frozenset()) -> tuple[bool, str]:
-        """문의 알맹이(상태를 바꾸지 않는다 — 다른 스레드에서 돌려도 된다). 살피다 난 오류로 열어 주지 않는다."""
+    def _gate_check(self, write, tool_name, tool_input, cwd, deny=(), own=frozenset(), rea=None) -> tuple[bool, str]:
+        """문의 알맹이(상태를 바꾸지 않는다 — 다른 스레드에서 돌려도 된다). 살피다 난 오류로 열어 주지 않는다. rea 는 그 세션의 역할이
+        REA 를 쥐었을 때의 역할 이름 — 그 역할만 제 REA 작업 폴더(`.gaf/rea/<역할>/`)를 읽는다(scope)."""
         if tool_name in own:                     # 엔진이 붙여 준 우리 도구 — 입력은 지휘자에 넘기는 글이다(_own_tools)
             return True, ""
         if _session_denied(tool_name, deny):
@@ -3161,7 +3206,7 @@ class Conductor:
                 return False, scope.LOOSE_PATCH_REASON.format(root=self.paths.root.as_posix(), paths=", ".join(loose))
             for name, data in scope.hook_checks(tool_name, tool_input, cwd or self.paths.root):
                 allowed, reason = scope.check_tool(name, data, write=write, root=self.paths.root,
-                                                   bash_deny=self.config.bash_deny)
+                                                   bash_deny=self.config.bash_deny, rea=rea)
                 if not allowed:
                     return False, reason
         except Exception as exc:  # noqa: BLE001
@@ -3654,7 +3699,7 @@ class Conductor:
             del self._lead_memo[:w.memo_sent]    # 알림이 총괄에게 닿았다
         if record is not None and not w.role.lead:
             # 레퍼런스 조사(1.16.0): 역할이 이 턴에서 조사를 청했으면 돌리고, 끝나는 대로 같은 일을 이어서 부른다(검토 · 검사 고리 앞에서).
-            outcome = await self._research_rounds(w, letter, record, outcome)
+            outcome = await self._follow_ups(w, letter, record, outcome)
         check_tail = ""
         if (record is not None and self.config.reviews and "default_review" not in record
                 and outcome.got_result and outcome.ok and not outcome.error
@@ -4166,6 +4211,8 @@ class Conductor:
         shell = "tools" if getattr(engine, "commands", "shell") == "tools" else getattr(engine, "shell", "bash")
         prefix = getattr(engine, "tool_prefix", lead_tools.TOOL_PREFIX)      # 도구 이름의 앞머리는 엔진마다 다르다
         tail = [(lead_tools.usage(shell, prefix) if role.lead else lead_tools.peer_usage(shell, prefix)).strip()]
+        if self.rea_role(role.name):             # REA 를 쥔 역할에게만 그 쓰는 법을 싣는다(1.17.0)
+            tail.append(lead_tools.rea_usage(prefix, self._rel(self._rea_work(role.name))).strip())
         custom = [f"[Custom · {layer['label']} — {layer['path']}]\n{body}"
                   for layer in self._custom_layers(role) if (body := _COMMENT.sub("", layer["text"]).strip())]
         framework_intro = intro
@@ -4277,9 +4324,23 @@ class Conductor:
         if w.token:                              # 닫힌 세션의 표로는 명령을 못 친다
             self._tokens.pop(w.token, None)
             w.token = ""
+        # 그 세션이 쥐고 있던 REA 도 내린다(증거 기록은 프로세스와 같이 사라진다 — 내보낸 묶음은 남는다). 세션을 떼는 이 자리에서 먼저
+        # 떼어 내고(기다림 없이) 닫기를 기다린 뒤에 내린다 — 닫기(최대 60초)를 기다리는 사이 다음 글이 띄운 REA 를 늦게 끝난 이 닫기가
+        # 건드리지 않게. 세션이 이미 없어도(띄우는 중에 세션이 먼저 닫혔다) 건너뛰지 않는다(11-27 다른 눈의 검수). REA 를 쓰지 않는
+        # 역할에서는 아무것도 하지 않고, REA 쪽이 예외를 내도 닫기는 이어진다.
+        try:
+            rea = self._rea_detach(w.name)
+        except Exception:  # noqa: BLE001
+            rea = None
+        try:
+            if session is not None:
+                await self._quiet_close(session)
+        finally:
+            if rea is not None:
+                with contextlib.suppress(Exception):
+                    await self._rea_shutdown(rea)
         if session is None:
             return
-        await self._quiet_close(session)
         self.store.emit("session.closed", role=w.name, reason=reason)
         if not self._closing:
             self._poke()                         # 메모리가 비기를 기다리던 줄이 다시 살펴보게
@@ -4826,7 +4887,7 @@ class Conductor:
             out = second
             if out.error and not out.got_result and not w.stop_requested:
                 await self._close_session(w, "error")
-            out = await self._research_rounds(w, letter, record, out)
+            out = await self._follow_ups(w, letter, record, out)
             if (out.error or not out.got_result or not out.ok or is_blocked_answer(out.text)
                     or w.stop_requested or self._closing):
                 break
@@ -5527,7 +5588,7 @@ class Conductor:
                 out = second
                 if out.error and not out.got_result and not w.stop_requested:
                     await self._close_session(w, "error")
-                out = await self._research_rounds(w, letter, record, out)
+                out = await self._follow_ups(w, letter, record, out)
                 if (out.error or not out.got_result or not out.ok or is_blocked_answer(out.text)
                         or w.stop_requested or self._closing):
                     end_reason = out.error or out.text[:600]
@@ -5584,6 +5645,10 @@ class Conductor:
 
     async def _finish_task(self, w: _Worker, letter: Letter, record: dict, out: _Outcome,
                            before: dict[str, str] | None, *, check_tail: str = "") -> None:
+        # 일이 끝났다(끝 · 멈춤 · 문제 모두) — 그 일의 끝난 REA 호출은 비우고, 아직 도는 것이 있으면 REA 를 내린다(다음 부름이 다시
+        # 띄운다). 앞 일의 호출이 다음 일의 자리를 막고 3600초까지 돌았다(11-27 다른 눈의 검수). 검사 · 검토 · 승인으로 같은 일이 이어지는
+        # 동안에는 여기에 오지 않는다 — 그 일의 다음 턴이 wait 로 받는다.
+        self._rea_reap(w.name)
         outside, created = await self._changed_outside(w, before)
         # 레퍼런스 조사의 보고(…/조사/<폴더>/보고.md)를 썼으면 형식을 본다 — 단 번호 · 주소 · 따온 말이 증거에 있는가만(알리기만 한다).
         # 보고는 자리나 머리의 두 줄(「- 조사 번호:」 · 「- 증거:」)로 알아본다(check.lines) — 이 일이 쓴 글(.md)만 넘긴다. 역할의 인계
@@ -5592,6 +5657,16 @@ class Conductor:
         briefs = [path for path in dict.fromkeys([*out.wrote, *record.get("observed_wrote", [])])
                   if str(path).lower().endswith(".md") and str(path).replace("\\", "/").casefold() != handoff]
         brief_lines = await asyncio.to_thread(research_check.lines, self.paths.root, briefs) if briefs else []
+        if briefs and self.rea_role(w.name):     # 분석 보고(REA 로 뜯어본 것)의 형식 — 단 증거 번호가 내보낸 묶음에 있는가만(알리기만 한다)
+            from .rea import check as rea_check
+            # 묶음은 이 역할이 내보낸 것으로 지휘자가 적어 둔 파일이고 그 지문이 그대로여야 한다(세션이 셸로 고친 묶음을 거른다)
+            exports = await asyncio.to_thread(self._rea_exports, w.name)
+            rea_lines = await asyncio.to_thread(functools.partial(rea_check.lines, self.paths.root, briefs, exports=exports))
+            if not rea_lines and self._rea_used(w.name, record["id"]):
+                # REA 로 뜯어본 일인데 알아볼 보고가 없다 — 다른 자리에 쓰고 머리의 두 줄을 빼면 확인이 아예 안 붙었다(11-27 다른 눈의 검수)
+                rea_lines = ["분석 보고 형식: 확인할 보고를 찾지 못했다 — 이 일이 쓴 글 가운데 머리에 「- 대상:」 · 「- 증거 묶음:」 두 줄이 있는 "
+                             "보고가 없다(틀: 서랍의 templates/teardown-brief)"]
+            brief_lines += rea_lines
         if (record.get("expect") and record.get("review_best") is not None
                 and record.get("verify") != "could_not_run"):
             # 검토가 앞 후보를 되살렸으면 마지막 탈락 후보 대신 지금 디스크의 결과물을 확인한다.
