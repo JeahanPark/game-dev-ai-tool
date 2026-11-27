@@ -19,6 +19,12 @@ REA(`rea-agents` · MIT)는 도구가 200개가 넘는 MCP 서버다. 세션에 
 그 역할에 도는 호출이 있으면 REA 를 내리고(다음 부름이 다시 띄운다), 세션이 닫힐 때는 늘 내린다. 내릴 때는 먼저 그 역할의
 `ReaSession` 을 새 것으로 바꿔 끼우고(`_rea_detach` — 기다림 없이) 옛 것을 배경에서 내린다(`_rea_shutdown`) — 늦게 끝난 닫기가 다음
 일이 띄운 REA 를 건드리지 않는다.
+
+자식의 임시 폴더(1.17.1): 띄울 때마다 따로 하나다(`<밑자리>/<순번>-<난수>` — TEMP · TMP · TMPDIR). 밑자리는 Windows 면 PC 의 임시 폴더
+아래 `gaf-rea/<작업 폴더의 지문>/`(gaf/paths.py 의 rea_temp_home), 옮길 자리가 없거나 다른 OS 면 작업 폴더 안 `tmp/` 다. 1.17.0 은 늘
+작업 폴더 안에 두었는데, 경로에 점으로 시작하는 마디(`.gaf`)가 있으면 REA 가 Ghidra 실행 폴더를 그 마디가 없는 윗폴더 — 프로젝트 뿌리 —
+로 옮겨, 뿌리에 대상의 사본까지 든 폴더가 생겼다(11-28 이 PC 에서 잼). 띄우기 전에 밑자리에 남은 폴더(이 지휘자가 쥔 것이 아닌 것 —
+지난번 지휘자가 나무째 죽으며 남긴 것)를 치우고, 내릴 때는 제 것을 지운 뒤 빈 윗폴더도 지운다.
 """
 from __future__ import annotations
 
@@ -32,10 +38,13 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .. import paths as gaf_paths
 
 COMMANDS = ("rea_tools", "rea_call")
 CALL_WAIT = 75.0                 # 도구 한 번의 마감(초) — 들어올 때 잡는다(띄우기 + 기다리기). Codex 의 도구 시간 제한(90초) 안쪽. 넘으면 「도는 중」으로 돌려주고 이어서 받게 한다
@@ -52,6 +61,10 @@ ARGS_SHOWN = 1500                # 승인 카드에 싣는 받는 값의 글자 
 EXPORTS_FILE = "rea-exports.json"  # 내보낸 증거 묶음의 지문을 적어 두는 곳(.gaf 바로 아래 — 세션의 Write · Edit · 셸 · REA 모두에게 닫힌 자리)
 EXPORTS_KEEP = 200               # 역할마다 쥐는 내보낸 묶음의 수(오래된 것부터 잊는다)
 TEMP_KEYS = ("TEMP", "TMP", "TMPDIR")
+_TEMP_HOME = re.compile(r"[0-9a-f]{16}")         # 옮긴 밑자리의 이름(작업 폴더의 지문 — paths.rea_temp_home)
+# 임시 폴더의 치우기와 만들기를 한 덩이로 한다 — 같은 역할의 두 띄우기(떼어 낸 옛 것의 늦은 띄우기와 새 것)가 서로 막 만든 폴더를 「남은 것」
+# 으로 치우지 않게. 쥔 것의 목록도 이 잠금 안에서 읽고, 새 폴더도 이 잠금 안에서 ReaSession.temps 에 넣는다.
+_TEMP_LOCK = threading.Lock()
 HEAD = "[지휘자 알림 — 사람의 말이 아니다] "
 TAIL = ("\n이 일을 이어서 한다: 그 도구 없이 할 수 있는 데까지 하고 마지막 답을 다시 쓴다(한 일 · 바뀐 파일 · 확인한 것). 못 본 것은 "
         "「못 봄」과 그 까닭으로 적는다. 다른 길(셸 명령 · 게임을 직접 띄우기)로 돌아가 하지 않는다.")
@@ -71,7 +84,7 @@ class ReaSession:
     client: Any = None                                   # gaf.rea.client.ReaClient
     tools: list = field(default_factory=list)            # tools/list 의 줄(이름 · 설명 · 받는 값)
     table: dict = field(default_factory=dict)            # 도구 → 효과(effects.table)
-    work: Path | None = None                             # .gaf/rea/<역할>/ — 결과 · 증거 묶음의 자리(자식의 TEMP 는 그 아래 tmp/<순번>-<난수>)
+    work: Path | None = None                             # .gaf/rea/<역할>/ — 결과 · 증거 묶음의 자리(자식의 TEMP 는 Windows 면 PC 의 임시 폴더의 gaf-rea/<지문>/<순번>-<난수>, 아니면 이 아래 tmp/<순번>-<난수>)
     opening: Any = None                                  # 띄우는 중인 작업 — 그 작업이 끝날 때 비운다(done 콜백 · 기다리던 쪽이 끊겨도 같이 부른 쪽이 둘을 띄우지 않게)
     grants: set = field(default_factory=set)             # 이 일에서 사람이 승인한 도구
     denied: set = field(default_factory=set)             # 이 일에서 사람이 거절한 도구
@@ -236,7 +249,10 @@ class ReaHost:
             return {"ok": False, "error": f"없는 도구다: {tool} — 비슷한 이름: {near}(찾기는 rea_tools)"}
         row = state.table.get(tool)
         flags = frozenset((row or {}).get("effects") or ())
-        refusal = gateway.check_paths(tool, arguments, flags, work=state.work, secrets=gaf_paths.run_dir(), root=self.paths.root)
+        # 임시 자리(Windows — PC 의 임시 폴더의 gaf-rea)는 띄울 때와 같은 셈으로 넘긴다(_make_temp) — 제 자리만 받는다
+        refusal = gateway.check_paths(tool, arguments, flags, work=state.work, secrets=gaf_paths.run_dir(), root=self.paths.root,
+                                      temp_root=gaf_paths.rea_temp_root(),
+                                      temp_home=gaf_paths.rea_temp_home(Path(state.work).resolve()))
         if refusal:
             return {"ok": False, "error": refusal}
         if tool == "import_evidence_bundle":
@@ -435,11 +451,12 @@ class ReaHost:
             raise RuntimeError("REA 가 깔려 있지 않다")
         work = self._rea_work(name)
         env = await asyncio.to_thread(rea_setup.server_env, work)
-        # 자식의 임시 폴더는 띄울 때마다 따로 둔다(work/tmp/<순번>-<난수>) — 같은 폴더를 쓰면 늦게 끝난 옛 것의 내리기가 새 자식의
-        # 임시 파일을 지운다(11-27 다른 눈의 검수의 고침과 함께). 내릴 때는 제 것만 치우고 tmp 가 비면 그것도 지운다.
+        # 자식의 임시 폴더는 띄울 때마다 따로 둔다(<밑자리>/<순번>-<난수>) — 같은 폴더를 쓰면 늦게 끝난 옛 것의 내리기가 새 자식의
+        # 임시 파일을 지운다(11-27 다른 눈의 검수의 고침과 함께). 밑자리는 Windows 면 PC 의 임시 폴더의 gaf-rea/<지문> 이다 — TEMP 에 점으로
+        # 시작하는 마디(`.gaf`)가 있으면 REA 가 Ghidra 실행 폴더를 프로젝트 뿌리로 옮겼다(11-28 잼 · gaf/paths.py). server_env 는 TEMP 를
+        # work/tmp 로 주므로 여기서 덮는다. 내릴 때는 제 것만 치우고 빈 윗폴더도 지운다.
         spawned = self.__dict__["_rea_spawned"] = self.__dict__.get("_rea_spawned", 0) + 1
-        temp = await asyncio.to_thread(_make_temp, work, spawned)
-        state.temps.append(temp)
+        temp = await asyncio.to_thread(_make_temp, work, spawned, self._rea_held, state.temps)      # state.temps 에는 잠금 안에서 넣는다
         env = {key: value for key, value in env.items() if key.upper() not in TEMP_KEYS}
         env.update({key: str(temp) for key in TEMP_KEYS})
         (work / ".gitignore").write_text("# REA 가 꺼낸 것 · 결과 · 증거 묶음 — 남의 게임에서 나온 것이다. git 에 올리지 않는다.\n*\n",
@@ -465,7 +482,7 @@ class ReaHost:
             await _close_client(client)               # 멈췄거나(내리기 · 상한) 실패했다 — 띄우던 것을 끈다
             with contextlib.suppress(ValueError):
                 state.temps.remove(temp)
-            await asyncio.to_thread(shutil.rmtree, temp, True)
+            await asyncio.to_thread(_drop_temps, [temp])
             raise
         if state.closed:
             # 띄우는 사이에 그 세션이 닫혔다(떼어 냈다) — 쥘 주인이 없다. 제 손을 닫고 「닫혔다」로 끝낸다(11-27 다른 눈의 검수: 세션이
@@ -531,12 +548,16 @@ class ReaHost:
             with contextlib.suppress(Exception):
                 await asyncio.wait(jobs, timeout=5)
         temps, state.temps = list(state.temps), []
-        for temp in temps:
+        if temps:
             with contextlib.suppress(Exception):
-                await asyncio.to_thread(shutil.rmtree, temp, True)
-        for folder in {Path(temp).parent for temp in temps}:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(os.rmdir, folder)     # 비었을 때만 지워진다 — 다음에 띄운 REA 의 것이 있으면 남는다
+                await asyncio.to_thread(_drop_temps, temps)   # 윗폴더는 비었을 때만 지워진다 — 다음에 띄운 REA 의 것이 있으면 남는다
+
+    def _rea_held(self) -> set[str]:
+        """이 지휘자가 쥔 자식의 임시 폴더들(견줄 꼴 — _temp_key) — 지금 세션들과 떼어 내 내리는 중인 것들의 temps. 띄우기의 스레드가
+        잠금 안에서 부른다(목록은 통째로 베껴 읽는다 — 루프 쪽이 그사이 고쳐도 깨지지 않게)."""
+        states = [*list((self.__dict__.get("_rea_sessions") or {}).values()),
+                  *list((self.__dict__.get("_rea_detached") or {}).values())]
+        return {_temp_key(temp) for state in states for temp in list(state.temps)}
 
     def _rea_reap(self, name: str) -> None:
         """일이 끝날 때(_finish_task — 끝 · 멈춤 · 문제 모두) · 역할을 멈출 때(_halt · 끌 때) — 끝난 호출은 비우고, 아직 도는 호출이
@@ -745,17 +766,69 @@ async def _close_client(client) -> None:
         pass
 
 
-def _make_temp(work: Path, number: int) -> Path:
-    """그 띄우기만의 임시 폴더 work/tmp/<순번>-<난수> 를 만든다 — 옛 것을 치우는 쪽이 그사이 tmp 를 지웠으면 다시 만든다."""
-    base = (Path(work) / "tmp").resolve()
-    for _ in range(5):
-        temp = base / f"{number}-{secrets.token_hex(3)}"
-        try:
-            temp.mkdir(parents=True)
+def _make_temp(work: Path, number: int, held=None, into: list | None = None) -> Path:
+    """그 띄우기만의 임시 폴더 <밑자리>/<순번>-<난수> 를 만든다(스레드에서 부른다). 밑자리는 paths.rea_temp_home(work)(Windows — PC 의
+    임시 폴더의 gaf-rea/<지문>), 없으면 work/tmp. 옛 것을 치우는 쪽이 그사이 밑자리를 지웠으면 다시 만든다.
+
+    만들기 전에 밑자리에 남은 폴더 — 이 지휘자가 쥔 것(held() · _temp_key 의 꼴)이 아닌 것, 곧 지난번 지휘자가 죽으며 남긴 것 — 를
+    지운다(한 프로젝트에 지휘자는 하나다). 옮긴 자리를 쓰면 작업 폴더 안 tmp 도 같은 규칙으로 치우고, 비면 지운다(server_env 가 만들어
+    둔 빈 폴더 · 1.17.0 이 남긴 것). 새 폴더는 into(그 ReaSession.temps)에 잠금 안에서 넣는다."""
+    legacy = (Path(work) / "tmp").resolve()
+    home = gaf_paths.rea_temp_home(Path(work).resolve())
+    base = home if home is not None else legacy
+    with _TEMP_LOCK:
+        keep = set(held()) if held is not None else set()
+        _sweep(base, keep)
+        if home is not None:
+            _sweep(legacy, keep)
+            with contextlib.suppress(OSError):
+                os.rmdir(legacy)                          # 비었을 때만 지워진다
+        for _ in range(5):
+            temp = base / f"{number}-{secrets.token_hex(3)}"
+            try:
+                temp.mkdir(parents=True)
+            except (FileExistsError, FileNotFoundError):
+                continue
+            if into is not None:
+                into.append(temp)
             return temp
-        except (FileExistsError, FileNotFoundError):
-            continue
     raise OSError("REA 의 임시 폴더를 만들지 못했다")
+
+
+def _temp_key(path) -> str:
+    """임시 폴더를 견줄 꼴 — 온전한 경로 · (Windows) 대소문자를 접는다."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _sweep(base: Path, keep: set[str]) -> None:
+    """밑자리 바로 아래의 폴더 가운데 keep 에 없는 것을 지운다 — 파일 · 링크는 두고, 못 지운 것(잠긴 파일)은 넘어간다."""
+    try:
+        with os.scandir(base) as found:
+            entries = list(found)
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            plain = (entry.is_dir(follow_symlinks=False) and not entry.is_symlink()
+                     and not getattr(entry, "is_junction", lambda: False)())     # is_junction 은 3.12 부터다
+        except OSError:
+            continue
+        path = base / entry.name
+        if plain and _temp_key(path) not in keep:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def _drop_temps(temps) -> None:
+    """내린(또는 못 띄운) 임시 폴더들을 지우고, 빈 윗폴더(work/tmp · 지문 폴더)와 — 옮긴 자리면 — 빈 gaf-rea 도 지운다(os.rmdir — 비었을
+    때만 · 같은 역할 · 다른 역할의 다음 REA 것이 있으면 남는다). 못 지워도 넘어간다(스레드에서 부른다)."""
+    for temp in temps:
+        shutil.rmtree(temp, ignore_errors=True)
+    for folder in {Path(temp).parent for temp in temps}:
+        with contextlib.suppress(OSError):
+            os.rmdir(folder)
+        if folder.parent.name == gaf_paths.REA_TEMP_FOLDER and _TEMP_HOME.fullmatch(folder.name):
+            with contextlib.suppress(OSError):
+                os.rmdir(folder.parent)
 
 
 def _make_parents(paths: list[str], work: Path) -> None:

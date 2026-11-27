@@ -7,6 +7,7 @@ from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path, PurePath
 
+from . import paths as gaf_paths
 from .paths import run_dir, user_dir
 
 ALWAYS_DENY = (".git/**", ".gaf/**", ".claude/**", "**/.env*", "CLAUDE.md", "AGENTS.md",
@@ -22,6 +23,13 @@ ALWAYS_DENY = (".git/**", ".gaf/**", ".claude/**", "**/.env*", "CLAUDE.md", "AGE
 # 읽는다(셸로 파일을 읽는 엔진(Codex)의 역할도 나눠 읽게 셸에도 연다). 다른 역할에게는 닫혀 있다 — 꺼낸 게임의 코드 · 글을 뜯어보기를
 # 맡지 않은 역할이 읽어 제 일에 옮기지 못하게(11-27 다른 눈의 검수). 쓰는 것은 누구도 못 한다(ALWAYS_DENY 의 `.gaf/**` — Write · Edit).
 # 셸의 문은 이름만 보므로 셸로 쓰는 것까지 막지는 못한다 — 그래서 증거 묶음은 지휘자가 적어 둔 지문과 견준다(gaf/rea/host.py).
+# REA 의 임시 자리(1.17.1 · Windows)도 같은 선이다: 자식 REA 의 TEMP 는 PC 의 임시 폴더 아래 `gaf-rea/<작업 폴더의 지문>/` 이고
+# (paths.rea_temp_home — 프로젝트 안에 두면 Ghidra 실행 폴더가 프로젝트 뿌리에 생겼다 · 11-28 잼), 거기에 Ghidra 프로젝트 · 캐시 · 대상의
+# 사본이 있다. 읽기 도구는 REA 를 쥔 그 역할이 제 자리를 읽을 때만 열린다(윗폴더 — PC 의 임시 폴더 전체 — 를 뒤지는 것은 막지 않는다 ·
+# 넘치게 막지 않는다). 셸은 `gaf-rea` 를 이름으로 가리키면 막는다 — REA 를 쥔 역할이 `gaf-rea/<제 지문>` 으로 적은 것만 지난다(이름만
+# 본다 — `$env:TEMP` 를 통째로 뒤지거나 변수에 담아 잇는 것은 못 막는다). REA 에 넘기는 경로도 같은 선이다(gaf/rea/gateway.py 의
+# check_paths). 쓰는 것은 누구도(REA 를 쥔 역할도) 못 한다 — 프로젝트 밖 폴더 승인으로 PC 의 임시 폴더가 열려 있어도.
+# 그 자리가 없는 PC(Windows 가 아님 · 옮길 자리가 없음 — rea_temp_root 가 None)에서는 아무것도 바뀌지 않는다.
 SECRET_FILE = ".gaf/server.json"
 STATE_OPEN = ("bin", "uploads")                   # 지휘자 폴더에서 모든 세션이 읽어도 되는 자리
 REA_FOLDER = "rea"                                # 그 아래의 `<역할>/` 은 REA 를 쥔 그 역할의 세션만 읽는다
@@ -42,6 +50,10 @@ def _gaf_in_command(rea: str | None) -> re.Pattern:
 _RUN_IN_COMMAND = re.compile(rf"[\\/]gaf[\\/]+run{_NAME_END}", re.IGNORECASE)
 _RUN_HOME_IN_COMMAND = re.compile(rf"(?:appdata[\\/]+local|localappdata[%}}]?|\.local[\\/]+state)[\\/]+gaf{_NAME_END}",
                                   re.IGNORECASE)
+# REA 의 임시 자리(`<PC 의 임시 폴더>/gaf-rea`)를 이름으로 가리키는 꼴 — 앞뒤로 이름이 더 이어지면(`gaf-rea-old` · `docs/gaf-rea.md` ·
+# `mygaf-rea`) 다른 이름이다.
+_REA_TEMP_IN_TEXT = re.compile(r"(?<![\w.\-])" + re.escape(gaf_paths.REA_TEMP_FOLDER) + _NAME_END, re.IGNORECASE)
+REA_TEMP_REASON = "늘 막는 곳이다: REA 의 임시 자리(PC 의 임시 폴더의 gaf-rea — 지휘자가 띄운 REA 만 쓴다)"
 SECRET_REASON = "접근 값 파일과 이 도구가 제한하는 지휘자 경로는 세션이 읽지 않는다 — 결과는 도구 `result`(없으면 셸 명령 `gaf result`), 올린 그림은 Read 로 본다"
 # 세션의 표(GAF_SESSION)를 지우거나 비운 채 `gaf …` 를 치면 사람이 친 명령으로 통한다(11-12 QA 명령-019) — 그 이름이 든 셸 명령을 막는다.
 # 알아볼 수 있는 꼴만 막는다(`env -i` · 스크립트로 지우는 것은 못 막는다 — 설계 §7 의 한계).
@@ -295,6 +307,11 @@ def _can_write_place(full: str, globs, base: Path, *, library_raw=False) -> tupl
     # 이 프로그램이 받아 둔 도구(REA · 그 Node — 1.17.0)는 지휘자가 샌드박스 밖에서 돌린다 — 세션이 고칠 수 있으면 무엇이든 돌리게 된다.
     if _reaches(full, _canon(user_dir() / "tools", base), search=False):
         return False, "늘 막는 곳이다: 이 프로그램이 받아 둔 도구의 자리(~/.gaf/tools — 지휘자가 돌리는 프로그램이다)"
+    # REA 의 임시 자리(1.17.1)에 쓰는 것은 지휘자가 띄운 REA 뿐이다 — `.gaf/rea/` 와 같은 뜻. 프로젝트 밖이라 ALWAYS_DENY 가 닿지 않고, 프로젝트
+    # 밖 폴더 승인이 PC 의 임시 폴더를 열면 쓰기 범위 안이 된다 — 그래서 범위보다 먼저 본다.
+    temp = _rea_temp_place()
+    if temp is not None and _reaches(full, temp, search=False):
+        return False, REA_TEMP_REASON
     inside, relative = _under(full, base)
     # 절대 경로 비교에도 정리된 전체 경로를 쓴다.
     absolute = (base / relative).resolve().as_posix() if inside else relative
@@ -543,6 +560,29 @@ def _run_place() -> str:
         return _plain(run_dir().resolve().as_posix())
     except OSError:
         return run_dir().as_posix()
+
+
+def _rea_temp_place() -> str | None:
+    """REA 의 임시 자리(paths.rea_temp_root — 이미 정리된 경로)의 `/` 꼴. 그 자리가 없는 PC 면 None."""
+    root = gaf_paths.rea_temp_root()
+    return None if root is None else _plain(Path(root).as_posix())
+
+
+def _rea_own_place(base: Path, rea: str | None) -> str | None:
+    """REA 를 쥔 그 역할의 제 임시 자리 — 지휘자가 띄울 때 쓰는 것과 같은 셈(paths.rea_temp_home(<뿌리>/.gaf/rea/<역할>))."""
+    if not rea:
+        return None
+    home = gaf_paths.rea_temp_home(base / ".gaf" / REA_FOLDER / rea)
+    return None if home is None else _plain(Path(home).as_posix())
+
+
+def _names_rea_temp(text: str, own: str | None = None) -> bool:
+    """글이 REA 의 임시 자리(`gaf-rea` 폴더)를 이름으로 가리키는가. own(제 자리의 지문)을 주면 `gaf-rea/<그 지문>` 으로 적은 것은 뺀다."""
+    for found in _REA_TEMP_IN_TEXT.finditer(text):
+        if own and re.match(r"[\\/]+" + re.escape(own) + r"(?:[\\/]|" + _NAME_END + ")", text[found.end():], re.IGNORECASE):
+            continue
+        return True
+    return False
 
 
 def _own_id(path) -> tuple[int, int] | None:
@@ -840,6 +880,8 @@ def reads_secret(tool_name, tool_input, root, rea: str | None = None) -> bool:
         run, state, secret = _run_place(), _canon(".gaf", base), _canon(SECRET_FILE, base)
         works = _canon(f".gaf/{REA_FOLDER}", base)
         own = _canon(f".gaf/{REA_FOLDER}/{rea}", base) if rea else None
+        temps = _rea_temp_place()                             # REA 의 임시 자리(1.17.1 · Windows) — 없는 PC 면 None
+        own_temp = _rea_own_place(base, rea) if temps is not None else None
         for value in values:
             for full in _readings(value, base):
                 if (_reaches(full, run, search=search) or _same_place(full, secret)
@@ -849,15 +891,26 @@ def reads_secret(tool_name, tool_input, root, rea: str | None = None) -> bool:
                 # REA 작업 폴더들: 제 것(`rea/<이 역할>/`) 안만 읽는다 — 다른 역할의 것과 그 윗폴더는 닫혀 있다(1.17.0)
                 if _reaches(full, works, search=False) and not (own and _reaches(full, own, search=False)):
                     return True
+                # REA 의 임시 자리도 같은 선: 제 자리(`gaf-rea/<이 역할의 지문>/`) 안만 — 남의 자리와 `gaf-rea` 자체는 닫혀 있다(1.17.1)
+                if (temps is not None and _reaches(full, temps, search=False)
+                        and not (own_temp and _reaches(full, own_temp, search=False))):
+                    return True
         glob = tool_input.get("glob") if tool_name == "Grep" else tool_input.get("pattern") if tool_name == "Glob" else None
         return isinstance(glob, str) and bool(_SECRET_IN_COMMAND.search(glob) or _state_glob(glob, rea)
-                                              or _names_run_folder(glob, root))
+                                              or _names_run_folder(glob, root)
+                                              or (temps is not None
+                                                  and _names_rea_temp(glob, own_temp.rpartition("/")[2] if own_temp else None)))
     if tool_name in ("Bash", "PowerShell"):
         command = str(tool_input.get("command") or "")
         if tool_name == "Bash":
             command = command_part(command)
+        # REA 의 임시 자리를 이름으로 가리킨 명령(1.17.1 — 이름만 본다): REA 를 쥔 역할이 `gaf-rea/<제 지문>` 으로 적은 것만 지난다 — 윗자리 ·
+        # 남의 지문 · 지문 없이 가리킨 것은 닫힌다(읽기 도구 · 글롭과 같은 선).
+        mine = _rea_own_place(_root(root), rea) if rea and _rea_temp_place() is not None else None
         return bool(_gaf_in_command(rea or None).search(command) or _names_run_folder(command, root)
-                    or (_SECRET_IN_COMMAND.search(command) and ".gaf" in command.casefold()))
+                    or (_SECRET_IN_COMMAND.search(command) and ".gaf" in command.casefold())
+                    or (_rea_temp_place() is not None
+                        and _names_rea_temp(command, mine.rpartition("/")[2] if mine else None)))
     return False
 
 

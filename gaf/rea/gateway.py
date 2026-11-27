@@ -243,7 +243,8 @@ def _facts(prop: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------- 경로 거르기
-def check_paths(name: str, arguments: dict, effects: frozenset, *, work: Path, secrets: Path, root: Path) -> str:
+def check_paths(name: str, arguments: dict, effects: frozenset, *, work: Path, secrets: Path, root: Path,
+                temp_root: Path | None = None, temp_home: Path | None = None) -> str:
     """"" 면 괜찮다 · 아니면 거절하는 까닭 한 줄. 글로만 본다(디스크를 보지 않는다).
 
     (1) 받는 값 속 글(몇 겹이든) 가운데 비밀 폴더(`secrets`) 안을 가리키는 것 — 온전한 경로 · `..` 로 돌아 들어가는 것 · 명령 글
@@ -257,12 +258,17 @@ def check_paths(name: str, arguments: dict, effects: frozenset, *, work: Path, s
     (5) 프로젝트의 지휘자 폴더(`root/.gaf`) 안은 **제** REA 작업 폴더(`work`)와 올린 그림 · 실행 부품(`uploads/` · `bin/`)만 받는다 —
         역할의 Read · 셸이 못 읽는 자리(기록 · 지시문 · 일의 결과 · 다른 역할의 REA 폴더)를 REA 의 읽는 도구로 돌아 읽지 못하게
         (scope 의 문과 같은 선).
+    (6) REA 의 임시 자리(`temp_root` — Windows 에서 PC 의 임시 폴더의 `gaf-rea` · gaf/paths.py)를 주면 그 안은 **제** 자리(`temp_home`)만
+        받는다 — 다른 역할 · 다른 프로젝트의 자리에는 그쪽 Ghidra 프로젝트 · 대상의 사본이 있다(1.17.1 · 세션의 문과 같은 선). 제 자리를
+        모르면(`temp_home` 이 없으면) 그 안은 다 닫힌다. 안 주면 보지 않는다.
     견줄 때 Windows 의 NTFS 흐름 꼴(`폴더::$INDEX_ALLOCATION\\파일` · `파일::$DATA`)은 그 폴더 · 그 파일로 보고, 대소문자를 안 가리는
     파일 체계(Windows · macOS)에서는 접어서 본다. 상대 경로는 `work` 에서 읽는다(지휘자가 자식의 cwd 를 `work` 로 띄운다)."""
     flavour = ntpath if _WINDOWS else posixpath
     work_text = _base(work, flavour)
     secret_text = _base(secrets, flavour)
     state_text = _base(Path(root) / ".gaf", flavour) if root else ""
+    temps_text = _base(temp_root, flavour) if temp_root else ""
+    mine_text = _base(temp_home, flavour) if temp_root and temp_home else ""
     shown = str(work) if flavour is ntpath else work_text
     known = {flag for flag in effects or () if isinstance(flag, str)}
     writes = not known or "writesFilesystem" in known
@@ -290,6 +296,8 @@ def check_paths(name: str, arguments: dict, effects: frozenset, *, work: Path, s
         elif state_text and _state(raw, work_text, state_text, flavour):
             return (f"지휘자 폴더(.gaf) 안은 제 REA 작업 폴더({shown})와 올린 그림(.gaf/uploads)만 받는다({key or '값'}) — 일의 "
                     "결과는 도구 `result` 로 본다")
+        elif temps_text and _other_temp(raw, work_text, temps_text, mine_text, flavour):
+            return f"REA 의 임시 자리(PC 의 임시 폴더의 gaf-rea)는 이 역할의 것만 받는다({key or '값'})"
     for key, raw in outputs:
         if not _absolute(raw, flavour):
             return f"{key} 는 쓰는 자리다 — {shown} 안의 온전한 경로로 적는다"
@@ -480,6 +488,18 @@ def _state(raw: str, work_text: str, state_text: str, flavour) -> bool:
     sep = "/" if flavour is posixpath else "\\"
     rest = full[len(state_text.rstrip(sep)):].lstrip(sep)
     return rest.split(sep, 1)[0] not in STATE_OPEN
+
+
+def _other_temp(raw: str, work_text: str, temps_text: str, mine_text: str, flavour) -> bool:
+    """REA 의 임시 자리(`temps_text`) 안인데 제 자리(`mine_text`) 밖을 가리키나 — 경로로 보이는 글만 본다(온전한 경로 · `..` 로 도는 길).
+    윗자리 자체도 닫혀 있다(그 안의 지문 폴더들이 보인다). 낱말 · 위로 가지 않는 상대 경로는 work 안이다."""
+    if not (_absolute(raw, flavour) or ".." in raw):
+        return False
+    try:
+        full = _normal(raw, work_text, flavour)
+    except (ValueError, TypeError):
+        return True
+    return _inside(full, temps_text, flavour) and not (mine_text and _inside(full, mine_text, flavour))
 
 
 # ---------------------------------------------------------------------- 결과 줄이기

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import tempfile
@@ -97,6 +98,54 @@ def run_dir() -> Path:
     if runtime:
         return Path(runtime) / "gaf"
     return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "gaf" / "run"
+
+
+# ---- 자식 REA 의 임시 자리(1.17.1)
+# 2026-11-28 이 PC 에서 잼(REA 6.10.1 + Ghidra 12.2 + JDK 25 · Windows): Ghidra 는 프로젝트 경로의 마디가 `.` 으로 시작하면 거절한다. 그래서
+# REA(`dist/ghidra/GhidraSessionRoot.js`)는 os.tmpdir() 에 그런 마디가 있으면 Ghidra 실행 폴더의 자리를 옮긴다 — Windows 가 아니면 /tmp 로,
+# Windows 에서는 그 마디가 없는 가장 가까운 윗폴더로. 1.17.0 은 자식의 TEMP 를 `<프로젝트>/.gaf/rea/<역할>/tmp/…` 로 주어 그 윗폴더가
+# 프로젝트 뿌리였다 — 대상을 읽는 동안 뿌리에 `rea-ghidra-<32자 hex>/`(Ghidra 프로젝트 · 캐시 · 대상의 사본 · JVM 의 집과 임시 폴더 — 작은
+# exe 하나에 53.8MB)가 생겼고, 나무째 죽이면 남을 수 있었다(꺼낸 것은 `.gaf/rea/` 에만이라는 약속이 깨졌다). TEMP 에 점 마디가 없으면 그
+# 폴더는 TEMP 안에 생겼다(잼). REA 에는 이 자리를 따로 정하는 환경변수가 없다(`SESSION_ROOT = ghidraSessionRoot()` — TEMP 뿐).
+# 그래서 Windows 에서는 자식의 TEMP 를 PC 의 임시 폴더 아래 `gaf-rea/<작업 폴더의 지문>/` 에 둔다(gaf/rea/host.py · 문은 gaf/scope.py).
+REA_TEMP_FOLDER = "gaf-rea"
+_WINDOWS = os.name == "nt"           # 시험이 바꾼다(os.name 자체를 바꾸면 pathlib 이 깨진다)
+
+
+def rea_temp_root() -> Path | None:
+    """Windows 에서 자식 REA 의 임시 폴더들을 두는 윗자리 `<PC 의 임시 폴더>/gaf-rea` — 경로만 셈한다(만들지 않는다).
+
+    후보는 차례로 tempfile.gettempdir() → 환경변수 LOCALAPPDATA(온전한 경로일 때)의 `Temp`. 정리한(resolve) 경로에 `.` 으로 시작하는
+    마디가 없는 첫 후보를 쓴다 — 있으면 REA 가 Ghidra 실행 폴더를 다시 그 윗폴더로 옮긴다. 둘 다 안 되면 None. Windows 가 아니면 None —
+    거기서는 REA 가 스스로 /tmp 로 옮기므로 작업 폴더 안 tmp 를 그대로 쓴다."""
+    if not _WINDOWS:
+        return None
+    candidates = []
+    with contextlib.suppress(OSError):                # 쓸 수 있는 임시 폴더가 하나도 없으면 gettempdir 이 오류다
+        candidates.append(tempfile.gettempdir())
+    local = os.environ.get("LOCALAPPDATA")
+    if local and Path(local).is_absolute():
+        candidates.append(str(Path(local) / "Temp"))
+    for candidate in candidates:
+        try:
+            folder = Path(candidate).resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not any(part.startswith(".") for part in folder.parts[1:]):
+            return folder / REA_TEMP_FOLDER
+    return None
+
+
+def rea_temp_home(work) -> Path | None:
+    """그 REA 작업 폴더(`<뿌리>/.gaf/rea/<역할>`)의 자식이 쓰는 임시 자리 `rea_temp_root()/<지문>` — 경로만 셈한다(만들지 않는다).
+
+    지문은 os.path.normcase(os.path.abspath(work)) 의 SHA-256 앞 16자 — 역할 이름에 한글 · 빈칸이 있어도 경로가 안전하고, 프로젝트 ·
+    역할마다 따로다(Windows 에서는 대소문자 · 빗금만 다른 적기도 같은 자리). 윗자리가 없으면(None) None."""
+    root = rea_temp_root()
+    if root is None:
+        return None
+    key = os.path.normcase(os.path.abspath(work))
+    return root / hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def find_root(start: Path | None = None) -> Path:

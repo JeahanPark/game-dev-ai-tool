@@ -169,7 +169,7 @@ REA 는 이 묶음에 들어 있지 않습니다 — 처음 켤 때 이 PC 가 �
 
 **알아 둘 것:**
 - Unity(Mono) 게임은 클래스 · 메서드 · 필드까지 보입니다(C# 글은 아닙니다). 그림 · 소리 · 수치 표 · 레벨은 대부분 안 보입니다.
-- C++ 엔진 · IL2CPP 의 네이티브 코드를 읽으려면 **Ghidra 12.2 이상(12.x)과 JDK 21 이상**을 직접 깔고, 환경변수 `GHIDRA_INSTALL_DIR` · `JAVA_HOME` 에 그 폴더를 둡니다(`gaf rea status` 가 맞는지 알려 줍니다). 없으면 그 부분은 「도구 없음」으로 적힙니다.
+- C++ 엔진 · IL2CPP 의 네이티브 코드를 읽으려면 둘을 직접 받아 풉니다(프로그램이 받아 주지 않습니다): **Ghidra 12.2 이상(12.x)**(https://github.com/NationalSecurityAgency/ghidra/releases) → `~\.gaf\tools\ghidra\` · **그 Ghidra 가 바라는 JDK — 12.2 는 JDK 25**(64비트 JDK · 예: Eclipse Temurin https://adoptium.net/) → `~\.gaf\tools\jdk\`. 받은 zip 을 그 폴더 안에 풀기만 하면 됩니다. PC 의 설정(환경변수)은 그대로라 Java 를 쓰는 다른 프로그램에 영향이 없습니다. 이미 PC 에 깔려 있으면 환경변수 `GHIDRA_INSTALL_DIR` · `JAVA_HOME` 으로도 됩니다. `gaf rea status` 가 맞는지 알려 줍니다. 없으면 그 부분은 「도구 없음」으로 적힙니다. (1.17.0 은 「JDK 21 이상」이라고 안내했는데 틀렸습니다 — 1.17.1)
 - IL2CPP · Godot · Unreal 게임으로는 아직 돌려 보지 못했습니다.
 
 ---

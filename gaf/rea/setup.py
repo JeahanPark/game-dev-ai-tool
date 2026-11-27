@@ -4,7 +4,10 @@
 - Node: 이 프로그램이 받아 둔 것이 있으면 그것을, 없으면 이 PC 의 `node` 가 NODE_RANGE 에 맞을 때 그것을 쓴다. 둘 다 없으면 nodejs.org 에서
   NODE_VERSION 을 받아 SHA-256 을 먼저 맞춰 본 뒤 tools/node/ 에 푼다(PC 에 깔지 않는다 · PATH 를 바꾸지 않는다).
 - REA: `npm install --prefix tools/rea/<VERSION> rea-agents@<VERSION>`. 띄울 스크립트는 package.json 의 bin 에서 읽는다(못 박지 않는다).
-자식 REA 의 환경은 정한 OS 값만 넘긴다(GAF_* · 키 · 토큰은 가지 않는다). 자식의 임시 폴더는 역할의 작업 폴더 안(work/tmp)이다.
+- Ghidra · JDK(1.17.1): 받지 않는다. 사람이 tools/ghidra/ · tools/jdk/ 에 풀어 둔 것을 환경변수(GHIDRA_INSTALL_DIR · JAVA_HOME)보다 먼저
+  쓴다 — PC 전체의 값을 바꾸면 그 PC 의 다른 도구(다른 판의 REA · Java 를 쓰는 빌드)가 깨질 수 있어서다(2026-11-28).
+자식 REA 의 환경은 정한 OS 값만 넘긴다(GAF_* · 키 · 토큰은 가지 않는다). 자식의 임시 폴더는 여기서 역할의 작업 폴더 안(work/tmp)으로
+주고, 지휘자가 띄울 때 그 띄우기만의 폴더로 덮는다(gaf/rea/host.py 의 _make_temp — Windows 는 PC 의 임시 폴더의 gaf-rea/<지문> · 1.17.1).
 """
 from __future__ import annotations
 
@@ -29,8 +32,8 @@ import urllib.request
 import zipfile
 from pathlib import Path, PureWindowsPath
 
-from . import (CHILD_ENV, GHIDRA_LINE, GHIDRA_MIN_MINOR, NODE_RANGE, NODE_SHA256, NODE_URL, NODE_VERSION, PACKAGE, VERSION,
-               state)
+from . import (CHILD_ENV, GHIDRA_JAVA_MIN, GHIDRA_LINE, GHIDRA_MIN_MINOR, JAVA_MIN_DEFAULT, NODE_RANGE, NODE_SHA256, NODE_URL,
+               NODE_VERSION, PACKAGE, VERSION, state)
 from .. import __version__
 from ..envclean import should_remove
 from ..paths import _replace, file_lock, user_dir
@@ -44,9 +47,14 @@ INSTALL_WAIT = INSTALL_SECONDS + 120     # 다른 곳(지휘자 · 다른 터미
 VERSION_SECONDS = 10                     # `node --version` 을 기다리는 시간
 JAVA_SECONDS = 5                         # `java -version` 을 기다리는 시간
 META_MAX_BYTES = 1024 * 1024             # 읽을 package.json 의 상한
-PROPERTIES_MAX_BYTES = 64 * 1024         # 읽을 Ghidra/application.properties 의 상한(12.1.4 의 것은 659B)
+PROPERTIES_MAX_BYTES = 64 * 1024         # 읽을 Ghidra/application.properties · JDK 의 release 의 상한(12.1.4 의 것은 659B ·
+                                         # 이 PC 의 JDK 21.0.12.1 의 release 는 1295B)
 TAIL_CHARS = 600                         # 실패한 npm 의 말에서 돌려주는 끝 글자 수
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# REA 6.10.1 은 Windows 에서 Java 를 JAVA_HOME 으로만 쓴다(<JAVA_HOME>\bin\java.exe) — JAVA_HOME 없이 PATH 맨 앞에 JDK 25 를 둬도
+# `runtime_unavailable`(java.exe: Owned Windows process requires an absolute executable path · 2026-11-28 실측). Windows 가 아닌 곳의
+# REA 안내 글은 PATH 도 된다고 읽힌다(재 보지는 못했다). 시험이 갈아 끼운다(os.name 은 바꾸지 않는다).
+WINDOWS = os.name == "nt"
 
 # 자식 REA 에게 넘기는 OS 값 — 이것만 넘긴다(있는 것만). GAF_* · 키 · 토큰 · 프록시 · NODE_OPTIONS 는 가지 않는다.
 # REA_ILSPY_CMD_PATH 는 넘기지 않는다: 6.10.1 의 MCP 길은 그 값을 설정에 옮겨 담기만 하고(dist/mcp/OwnedMcpServers-*.js) 어느 도구도
@@ -66,8 +74,15 @@ NOTICE = ("돌려 보며 관찰하고 아이디어 · 원리를 참고하는 것
 _VERSION = re.compile(r"v?([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})")
 _RANGE_PART = re.compile(r"(\^|>=)\s*([0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9})")
 # Ghidra 의 판 — REA 의 GHIDRA_RELEASE_PATTERN(`^(\d+)\.(\d+)(?:\.(\d+))?([-+].*)?$`)과 같은 꼴(길이에만 상한)
-_GHIDRA_VERSION = re.compile(r"([0-9]{1,9})\.([0-9]{1,9})(?:\.[0-9]{1,9})?(?:[-+][0-9A-Za-z._+-]{0,40})?")
+_GHIDRA_VERSION = re.compile(r"([0-9]{1,9})\.([0-9]{1,9})(?:\.([0-9]{1,9}))?([-+][0-9A-Za-z._+-]{0,40})?")
 _GHIDRA_KEY = re.compile(r"application\.version\s*[=:]\s*(\S.*?)\s*")
+_GHIDRA_JAVA_KEY = re.compile(r"application\.java\.min\s*[=:]\s*(\S.*?)\s*")
+_GHIDRA_JAVA_MAX_KEY = re.compile(r"application\.java\.max\s*[=:]\s*(\S.*?)\s*")     # 12.2 · 12.1.4 는 빈 값(맞지 않는다 → None)
+_JAVA_FEATURE = re.compile(r"[1-9][0-9]{0,3}")                                     # application.java.min · max 의 값
+_JAVA_RELEASE = re.compile(r'JAVA_VERSION\s*=\s*"([^"\s]{1,40})"\s*')      # JDK 의 release 파일 — JAVA_VERSION_DATE 같은 줄은 맞지 않는다
+_JAVA_MAJOR = re.compile(r"([0-9]{1,9})(?![0-9])(?:\.([0-9]{1,9})(?![0-9]))?")
+_PUT = " · `~/.gaf/tools/{}/` 에 풀어 두면 이 프로그램만 쓴다(PC 의 설정은 그대로)"   # 경로는 글자 그대로(진짜 집 폴더를 찍지 않는다)
+_MINE = " · 이 프로그램의 자리에 둔 것"
 
 
 # ---------------------------------------------------------------- 자리
@@ -81,6 +96,31 @@ def rea_dir() -> Path:
 
 def _node_home() -> Path:
     return tools_dir() / "node"
+
+
+GHIDRA_FOLDER = "ghidra"     # tools_dir() 아래 사람이 Ghidra 를 풀어 두는 폴더 — 줄의 `~/.gaf/tools/…` 와 같은 이름
+JDK_FOLDER = "jdk"
+# 그 Ghidra 폴더는 쓸 수 있어야 한다 — Ghidra 는 처음 돌 때 제 설치 폴더에 쓴다(Ghidra/Processors/*/data/languages/ 에 빈 *.sla.lock
+# 135개 · 12.2 · 2026-11-28 실측).
+
+
+def _ghidra_home() -> Path:
+    return tools_dir() / GHIDRA_FOLDER
+
+
+def _jdk_home() -> Path:
+    return tools_dir() / JDK_FOLDER
+
+
+def _unpacked(root: Path) -> list[Path]:
+    """root 아래 폴더와 그 한 칸 아래 폴더(묶음 이름의 폴더를 하나 더 만들고 그 안에 푸는 압축 프로그램이 있다) — 이름 차례.
+    「.」 으로 시작하는 폴더(반쯤 푼 것 따위)는 보지 않는다."""
+    def folders(base: Path) -> list[Path]:
+        try:
+            return sorted(path for path in base.iterdir() if path.is_dir() and not path.name.startswith("."))
+        except OSError:
+            return []
+    return [found for top in folders(root) for found in (top, *folders(top))]
 
 
 # ---------------------------------------------------------------- 판
@@ -540,17 +580,30 @@ def server_argv() -> list[str] | None:
 def server_env(work: Path) -> dict[str, str]:
     """자식 REA 의 환경 — 빈 데서 시작해 SERVER_ENV_KEEP 가운데 있는 것만 · 그 Node 의 폴더를 PATH 맨 앞에 · TEMP/TMP/TMPDIR 는
     work/tmp(만든다) · CHILD_ENV. GAF_* 는 절대 넣지 않는다. 경로 값(GHIDRA_INSTALL_DIR · JAVA_HOME)은 온전한 경로일 때만 넘긴다 —
-    REA 6.10.1 은 아니면 설정 오류로 initialize 전에 끝난다(그러면 REA 를 아예 못 쓴다 · 빼면 네이티브 길만 못 쓴다)."""
+    REA 6.10.1 은 아니면 설정 오류로 initialize 전에 끝난다(그러면 REA 를 아예 못 쓴다 · 빼면 네이티브 길만 못 쓴다).
+
+    이 프로그램의 자리에 둔 Ghidra(판이 맞는 것)가 있으면 그것을 이 PC 의 값보다 먼저 준다(1.17.1). JAVA_HOME 은 상태의 Java 와 같은
+    차례(_pick_java: 이 프로그램의 자리 → java 가 든 JAVA_HOME → PATH 의 JDK 폴더)로 고른다 — REA 는 Windows 에서 JAVA_HOME 의 JDK 만
+    쓴다(2026-11-28 실측). 고른 것이 없으면 지금처럼 이 PC 의 JAVA_HOME 을 (온전한 경로면) 그대로 넘긴다. 고른 JDK 의 bin 은 PATH 의 Node
+    의 폴더 다음에 둔다 — REA 가 부르는 다른 도구가 같은 JDK 를 쓰게(PATH 에서 고른 것이면 이미 거기 있어 건드리지 않는다).
+    여기서는 java 를 돌리지 않는다(판은 보지 않는다)."""
     temp = (Path(work) / "tmp").resolve()
     temp.mkdir(parents=True, exist_ok=True)
     env = {name: os.environ[name] for name in SERVER_ENV_KEEP if name in os.environ}
+    ghidra, java = _private_ghidra(), _pick_java(which)
+    if ghidra is not None and os.path.isabs(ghidra["path"]):
+        env["GHIDRA_INSTALL_DIR"] = ghidra["path"]
+    java_bin = None
+    if java is not None and java["home"] and os.path.isabs(java["home"]):
+        env["JAVA_HOME"] = java["home"]
+        java_bin = str(Path(java["path"]).parent) if java["from"] != "path" else None
     for name in ABSOLUTE_ONLY:
         if name in env and not os.path.isabs(env[name].strip()):
             del env[name]
     found = node()
-    if found is not None:
-        folder = str(Path(found["path"]).parent)
-        env["PATH"] = folder + os.pathsep + env["PATH"] if env.get("PATH") else folder
+    front = ([str(Path(found["path"]).parent)] if found is not None else []) + ([java_bin] if java_bin else [])
+    if front:
+        env["PATH"] = os.pathsep.join([*front, env["PATH"]]) if env.get("PATH") else os.pathsep.join(front)
     for name in ("TEMP", "TMP", "TMPDIR"):
         env[name] = str(temp)
     env.update(CHILD_ENV)
@@ -558,56 +611,164 @@ def server_env(work: Path) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------- 보기
-def _ghidra_version(home: Path) -> str:
-    """<home>/Ghidra/application.properties 의 `application.version=`(REA 가 판을 보는 자리) — 못 읽거나 판의 꼴이 아니면 빈 글."""
+def _small_text(path: Path) -> str | None:
+    """작은 설정 파일의 글 — 없거나 · 못 읽거나 · PROPERTIES_MAX_BYTES 보다 크면 None."""
     try:
-        with open(home / "Ghidra" / "application.properties", "rb") as stream:
+        with open(path, "rb") as stream:
             raw = stream.read(PROPERTIES_MAX_BYTES + 1)
     except OSError:
-        return ""
-    if len(raw) > PROPERTIES_MAX_BYTES:
-        return ""
-    found = ""
-    for line in raw.decode("utf-8", errors="replace").splitlines():      # 같은 키가 둘이면 Java 의 Properties 처럼 마지막 것
-        hit = _GHIDRA_KEY.fullmatch(line.strip())
-        if hit:
-            found = hit[1]
-    return found if _GHIDRA_VERSION.fullmatch(found) else ""
+        return None
+    return None if len(raw) > PROPERTIES_MAX_BYTES else raw.decode("utf-8", errors="replace")
+
+
+def _ghidra_facts(home: Path) -> tuple[str, int | None, int | None]:
+    """<home>/Ghidra/application.properties → (`application.version=`(REA 가 판을 보는 자리) · `application.java.min=` ·
+    `application.java.max=`(REA 가 JDK 를 가리는 두 값 · 주판)). 못 읽거나 꼴이 아니면 빈 글 · None — 같은 키가 둘이면 Java 의 Properties
+    처럼 마지막 것."""
+    text = _small_text(home / "Ghidra" / "application.properties")
+    found = {_GHIDRA_KEY: "", _GHIDRA_JAVA_KEY: "", _GHIDRA_JAVA_MAX_KEY: ""}
+    for line in (text or "").splitlines():
+        line = line.strip()
+        key = next((key for key in found if key.fullmatch(line)), None)
+        if key is not None:
+            found[key] = key.fullmatch(line)[1]
+    version, low, high = found.values()
+    return (version if _GHIDRA_VERSION.fullmatch(version) else "",
+            int(low) if _JAVA_FEATURE.fullmatch(low) else None, int(high) if _JAVA_FEATURE.fullmatch(high) else None)
+
+
+def _ghidra_seen(value: str, home: Path | None, private: bool) -> dict:
+    """한 Ghidra 폴더 → {"path", "ok": 폴더가 있나, "version": 읽은 판(못 읽으면 빈 글), "fits": VERSION 이 받는 판인가(GHIDRA_LINE.x 의
+    부판 GHIDRA_MIN_MINOR 이상 · 판을 못 읽었으면 None), "private": 이 프로그램의 자리에 둔 것인가, "java_min" · "java_max": 받는 JDK 의
+    아래 · 위 주판(못 읽거나 빈 값이면 None)}."""
+    ok = home is not None and home.is_dir()
+    version, java_min, java_max = _ghidra_facts(home) if ok else ("", None, None)
+    parts = _GHIDRA_VERSION.fullmatch(version) if version else None
+    fits = None if parts is None else int(parts[1]) == GHIDRA_LINE and int(parts[2]) >= GHIDRA_MIN_MINOR
+    return {"path": value, "ok": ok, "version": version, "fits": fits, "private": private, "java_min": java_min, "java_max": java_max}
+
+
+def _ghidra_order(item: dict) -> tuple:
+    """높은 판이 큰 값 — 같은 판이면 꼬리표(-DEV 따위)가 없는 것이 크다."""
+    parts = _GHIDRA_VERSION.fullmatch(item["version"])
+    return int(parts[1]), int(parts[2]), int(parts[3] or 0), parts[4] is None
+
+
+def _private_ghidras() -> list[dict]:
+    """tools/ghidra/ 아래(한 칸 아래까지) 판을 읽은 Ghidra 들."""
+    seen = [_ghidra_seen(str(folder), folder, True) for folder in _unpacked(_ghidra_home())]
+    return [item for item in seen if item["version"]]
+
+
+def _private_ghidra(found: list[dict] | None = None) -> dict | None:
+    """이 프로그램의 자리에 둔 Ghidra 가운데 판이 맞는 가장 높은 판."""
+    fits = [item for item in (_private_ghidras() if found is None else found) if item["fits"]]
+    return max(fits, key=_ghidra_order) if fits else None
 
 
 def _ghidra() -> dict:
-    """GHIDRA_INSTALL_DIR → {"path", "ok": 폴더가 있나, "version": 읽은 판(못 읽으면 빈 글),
-    "fits": VERSION 이 받는 판인가(GHIDRA_LINE.x 의 부판 GHIDRA_MIN_MINOR 이상 · 판을 못 읽었으면 None)}."""
+    """쓸 Ghidra(_ghidra_seen 의 꼴) — 이 프로그램의 자리에 둔 것 가운데 판이 맞는 가장 높은 판, 없으면 GHIDRA_INSTALL_DIR.
+
+    이 프로그램의 자리에 판이 안 맞는 것만 있으면 환경변수 쪽을 본다(둘 다 안 맞으면 환경변수 쪽의 「판이 낮다」). 환경변수의 폴더가 없을
+    때만 그 안 맞는 것(가장 높은 판)을 돌려준다 — 「없음」 대신 둔 것의 판이 낮다고 알리게."""
+    private = _private_ghidras()
+    chosen = _private_ghidra(private)
+    if chosen is not None:
+        return chosen
     value = os.environ.get("GHIDRA_INSTALL_DIR", "")
-    ok = bool(value) and Path(value).is_dir()
-    version = _ghidra_version(Path(value)) if ok else ""
-    parts = _GHIDRA_VERSION.fullmatch(version) if version else None
-    fits = None if parts is None else int(parts[1]) == GHIDRA_LINE and int(parts[2]) >= GHIDRA_MIN_MINOR
-    return {"path": value, "ok": ok, "version": version, "fits": fits}
+    seen = _ghidra_seen(value, Path(value) if value else None, False)
+    return seen if seen["ok"] or not private else max(private, key=_ghidra_order)
 
 
-def _java(which, run) -> dict:
-    home = os.environ.get("JAVA_HOME", "")
-    path = ""
-    if home:
-        candidate = Path(home) / "bin" / ("java.exe" if os.name == "nt" else "java")
-        path = str(candidate) if candidate.is_file() else ""
-    path = path or str(which("java") or "")
-    if not path:
-        return {"path": "", "ok": False, "version": ""}
-    version = ""
+def _java_binary(home: Path) -> Path:
+    return home / "bin" / ("java.exe" if os.name == "nt" else "java")
+
+
+def _java_major(version) -> int | None:
+    """판의 맨 앞 수 — `21.0.12.1` → 21 · `25-ea` → 25 · 옛 꼴 `1.8.0_402` → 8. 못 읽으면 None."""
+    if not isinstance(version, str) or len(version) > 40:
+        return None
+    hit = _JAVA_MAJOR.match(version.strip())
+    if not hit:
+        return None
+    major = int(hit[1])
+    return int(hit[2]) if major == 1 and hit[2] else major
+
+
+def _release_version(home: Path) -> str:
+    """<home>/release(JDK 묶음마다 있다)의 `JAVA_VERSION="…"` — 못 읽으면 빈 글. 같은 키가 둘이면 마지막 것."""
+    found = ""
+    for line in (_small_text(home / "release") or "").splitlines():
+        hit = _JAVA_RELEASE.fullmatch(line.strip())
+        if hit:
+            found = hit[1]
+    return found
+
+
+def _private_java() -> dict | None:
+    """tools/jdk/ 아래(한 칸 아래까지 · 맥은 <폴더>/Contents/Home) java 실행 파일이 있는 JDK 가운데 판이 가장 높은 것
+    → {"path", "home", "version": release 로 읽은 판(못 읽으면 빈 글)}. 판은 release 로, 못 읽으면 폴더 이름의 수로 견준다(돌리지 않는다)."""
+    best = None
+    for folder in _unpacked(_jdk_home()):
+        for home in (folder, folder / "Contents" / "Home"):
+            binary = _java_binary(home)
+            if not binary.is_file():
+                continue
+            version = _release_version(home)
+            order = tuple(int(part) for part in re.findall(r"[0-9]{1,9}", version or folder.name)[:6])
+            if best is None or order > best[0]:
+                best = (order, {"path": str(binary), "home": str(home), "version": version})
+    return None if best is None else best[1]
+
+
+def _java_said(path: str, run) -> str:
+    """`java -version` 이 말한 판(JAVA_SECONDS 안) — 못 읽으면 빈 글."""
     try:
         done = run([path, "-version"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                    timeout=JAVA_SECONDS, stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW)
         found = re.search(r'version "([^"\s]{1,40})"', (getattr(done, "stderr", "") or "") + (getattr(done, "stdout", "") or ""))
-        version = found[1] if found else ""
+        return found[1] if found else ""
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
-        pass
-    return {"path": path, "ok": True, "version": version}
+        return ""
+
+
+def _jdk_of(binary: Path) -> str:
+    """PATH 에서 찾은 java 가 JDK 폴더의 것(<home>/bin/java · <home>/release 가 있다)이면 그 폴더 — 연결(심볼릭 링크)은 따라간다.
+    대신 띄우는 파일(Windows 의 javapath 따위)이면 빈 글."""
+    with contextlib.suppress(OSError, RuntimeError):
+        binary = binary.resolve()
+    home = binary.parent.parent
+    return str(home) if binary.parent.name.lower() == "bin" and (home / "release").is_file() else ""
+
+
+def _pick_java(which) -> dict | None:
+    """쓸 Java 를 고른다(돌리지 않는다 · `_java` 와 `server_env` 가 같이 쓴다) — 이 프로그램의 자리(tools/jdk/) → 환경변수 JAVA_HOME
+    (온전한 경로이고 그 안에 java 실행 파일이 있을 때) → PATH 의 java. → {"path", "home": JAVA_HOME 으로 줄 폴더(PATH 의 java 가 JDK
+    폴더의 것이 아니면 빈 글), "version": release 로 읽은 판(이 프로그램의 자리의 것만 · 아니면 빈 글), "from": "private" | "env" | "path"}."""
+    private = _private_java()
+    if private is not None:
+        return {**private, "from": "private"}
+    home = os.environ.get("JAVA_HOME", "").strip()
+    if home and os.path.isabs(home) and _java_binary(Path(home)).is_file():
+        return {"path": str(_java_binary(Path(home))), "home": home, "version": "", "from": "env"}
+    found = which("java")
+    return {"path": str(found), "home": _jdk_of(Path(found)), "version": "", "from": "path"} if found else None
+
+
+def _java(which, run) -> dict:
+    """쓸 Java(_pick_java 의 차례) → {"path", "ok", "version", "private": 이 프로그램의 자리에 둔 것인가, "home": JAVA_HOME 으로 줄 폴더
+    (못 주면 빈 글), "major": 판의 맨 앞 수(못 읽으면 None)}. 이 프로그램의 자리의 것은 판을 release 파일로 읽고 못 읽을 때만, 나머지는
+    늘 `-version` 을 돌린다(JAVA_SECONDS 안)."""
+    picked = _pick_java(which)
+    if picked is None:
+        return {"path": "", "ok": False, "version": "", "private": False, "home": "", "major": None}
+    version = picked["version"] or _java_said(picked["path"], run)
+    return {"path": picked["path"], "ok": True, "version": version, "private": picked["from"] == "private", "home": picked["home"],
+            "major": _java_major(version)}
 
 
 def status(*, run=None, which=None) -> dict:
-    """이 PC 에 무엇이 있나(깔지 않고 보기만) — 켰는지 · 쓸 Node · REA · REA 가 쓰는 것(Ghidra · Java).
+    """이 PC 에 무엇이 있나(깔지 않고 보기만) — 켰는지 · 쓸 Node · REA · REA 가 쓰는 것(Ghidra · Java — 이 프로그램의 자리에 둔 것을 먼저).
 
     ILSpy 는 보지 않는다 — 6.10.1 의 MCP 도구는 ILSpy 를 부르지 않는다(닷넷의 클래스 · 메서드 · IL 은 inspect_managed_members 가
     ILSpy 없이 보인다 · REA_ILSPY_CMD_PATH 를 읽는 곳은 `rea doctor` 뿐이다).
@@ -642,22 +803,51 @@ def status_rows(data: dict | None = None) -> list[tuple[str, bool, str]]:
             rows.append(("Node", False, f"{'판을 읽지 못했다' if seen else '없음'} — {fix}"))
     ghidra = data.get("ghidra") or {}
     want = f"{GHIDRA_LINE}.{GHIDRA_MIN_MINOR} 이상"
+    mine = _MINE if ghidra.get("private") else ""
     if ghidra.get("ok") and ghidra.get("version") and ghidra.get("fits") is True:
-        rows.append(("Ghidra", True, f"있음({ghidra['version']})"))
+        rows.append(("Ghidra", True, f"있음({ghidra['version']}){mine}"))
     elif ghidra.get("ok") and ghidra.get("version") and ghidra.get("fits") is False:
-        rows.append(("Ghidra", False, f"있음({ghidra['version']}) — REA {VERSION} 은 {want}({GHIDRA_LINE}.x)을 바란다 · "
-                                      "네이티브 실행 파일의 코드는 못 읽는다(고를 것)"))
+        rows.append(("Ghidra", False, f"있음({ghidra['version']}){mine} — REA {VERSION} 은 {want}({GHIDRA_LINE}.x)을 바란다 · "
+                                      "네이티브 실행 파일의 코드는 못 읽는다(고를 것)" + _PUT.format(GHIDRA_FOLDER)))
     elif ghidra.get("ok"):
         rows.append(("Ghidra", True, f"있음(판은 읽지 못했다 — REA {VERSION} 은 {want}을 바란다)"))
     else:
         where = "GHIDRA_INSTALL_DIR 의 폴더가 없다" if ghidra.get("path") else "없음"
-        rows.append(("Ghidra", False, f"{where} — 네이티브 실행 파일의 코드는 못 읽는다(고를 것)"))
-    java = data.get("java") or {}
-    if java.get("ok"):
-        rows.append(("Java", True, f"있음 {java['version']}" if java.get("version") else "있음(판은 읽지 못했다)"))
-    else:
-        rows.append(("Java", False, "없음 — Ghidra 가 쓴다(JDK 21 이상 · 고를 것)"))
+        rows.append(("Ghidra", False, f"{where} — 네이티브 실행 파일의 코드는 못 읽는다(고를 것)" + _PUT.format(GHIDRA_FOLDER)))
+    rows.append(_java_row(data.get("java") or {}, ghidra))
     return rows
+
+
+def _java_row(java: dict, ghidra: dict) -> tuple[str, bool, str]:
+    """Java 의 줄 — 고른 Ghidra 가 받는 JDK(그 폴더의 application.java.min · max — min 을 못 읽으면 JAVA_MIN_DEFAULT · max 가 없으면
+    위는 열림)와 판의 맨 앞 수를 견준다. 판을 못 읽었으면 지금처럼 「있음」으로 둔다(Ghidra 가 받는 판을 읽었으면 그것을 붙인다).
+    Windows 에서 JAVA_HOME 으로 줄 수 없는 java(PATH 의 대신 띄우는 파일 따위)는 REA 가 못 쓴다(2026-11-28 실측) — home 칸이 없는 예전
+    꼴은 판으로만 본다."""
+    read = (lambda key: ghidra.get(key) if ghidra.get("ok") and isinstance(ghidra.get(key), int) else None)
+    known, top = read("java_min"), read("java_max")
+    need = known or JAVA_MIN_DEFAULT
+    span = f"{need}~{top} 를" if top else f"{need} 이상을"
+    put = _PUT.format(JDK_FOLDER)
+    no_native = " · 네이티브 실행 파일의 코드는 못 읽는다(고를 것)" + put
+    if ghidra.get("ok"):
+        wants = f"{'이 Ghidra(' + ghidra['version'] + ')' if ghidra.get('version') else '이 Ghidra '}는 JDK {span} 바란다"
+    else:
+        wants = f"Ghidra 는 JDK {need} 이상을 바란다({GHIDRA_LINE}.{GHIDRA_MIN_MINOR} 는 {GHIDRA_JAVA_MIN} 이상)"
+    if not java.get("ok"):
+        need_text = (f"이 Ghidra 는 JDK {need}~{top}" if top else f"이 Ghidra 는 JDK {need} 이상") if ghidra.get("ok") else (
+            f"JDK 는 Ghidra 가 바라는 판 — {GHIDRA_LINE}.{GHIDRA_MIN_MINOR} 는 {GHIDRA_JAVA_MIN} 이상")
+        return "Java", False, f"없음 — Ghidra 가 쓴다({need_text} · 고를 것)" + put
+    mine = _MINE if java.get("private") else ""
+    version = java.get("version") or ""
+    major = java["major"] if isinstance(java.get("major"), int) else _java_major(version)
+    shown = f"있음 {version}{mine}" if major is not None else f"있음(판은 읽지 못했다){mine}"
+    if WINDOWS and "home" in java and not java["home"]:
+        return "Java", False, f"{shown} — REA 는 Windows 에서 JAVA_HOME 의 JDK 만 쓴다(PATH 의 java 는 못 쓴다)" + no_native
+    if major is None:
+        return "Java", True, shown + (f" — {wants}" if known or top else "")
+    if major < need or (top is not None and major > top):
+        return "Java", False, f"{shown} — {wants}" + no_native
+    return "Java", True, shown
 
 
 def status_lines(data: dict | None = None) -> list[str]:

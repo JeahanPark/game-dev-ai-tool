@@ -2,7 +2,8 @@
 
 깔기 · PC 마다 켠 상태 · 자식의 환경은 `setup` · `state` 가, 자식과 말하기 · 효과 · 경로 · 결과 줄이기는 다른 모듈이 한다.
 판과 받는 곳은 여기 한 곳에 못 박는다 — 깔 판(VERSION)과 그 판이 바라는 Node 의 범위(NODE_RANGE), 맞는 Node 가 없을 때 받을 판과
-그 SHA-256(nodejs.org 의 SHASUMS256.txt · 2026-11-27 읽음), 그 판이 받는 Ghidra 의 줄(GHIDRA_LINE · GHIDRA_MIN_MINOR).
+그 SHA-256(nodejs.org 의 SHASUMS256.txt · 2026-11-27 읽음), 그 판이 받는 Ghidra 의 줄(GHIDRA_LINE · GHIDRA_MIN_MINOR)과 Ghidra 가
+바라는 JDK(JAVA_MIN_DEFAULT · GHIDRA_JAVA_MIN · 1.17.1).
 """
 
 PACKAGE = "rea-agents"
@@ -20,5 +21,13 @@ NODE_URL = "https://nodejs.org/dist/v{version}/node-v{version}-{name}"
 # SUPPORTED_GHIDRA_VERSION "12.2" · 같은 주판에 부판 >= 2 · 2026-11-27 읽음). 이 PC 의 12.1.4 는 `unsupported_version` 으로 거절됐다(실측).
 GHIDRA_LINE = 12
 GHIDRA_MIN_MINOR = 2
+# Ghidra 가 바라는 JDK — REA 6.10.1 은 고른 Ghidra 의 Ghidra/application.properties 의 `application.java.min` · `application.java.max`
+# 로 JDK 를 가린다(dist/ghidra/GhidraInstallationPolicy.js · 「64-bit full JDK」라야 한다 · JRE 는 안 된다 · 2026-11-28 읽음).
+# 12.2 는 min=25 · max 는 빈 값(GhidraDocs/GettingStarted.md 원문 「Java 25 64-bit Runtime and Development Kit (JDK)」), 12.1.4 는
+# min=21 · max 는 빈 값. 1.17.0 은 이 PC 의 Ghidra 12.1.4 로만 재서 「JDK 21 이상」이라고 적었다 — 틀린 안내였다. 11-28 실측(Windows):
+# 12.2 + JDK 21 은 `provider_unavailable`(`java: unsupported_version — 21.0.12.1; … accepted a 64-bit full JDK 25 or newer`),
+# 12.2 + JDK 25(Temurin 25.0.5.1)는 됐다. 고른 Ghidra 에서 min 을 못 읽으면 JAVA_MIN_DEFAULT 와 견준다(12.1.4 에 적힌 값).
+JAVA_MIN_DEFAULT = 21
+GHIDRA_JAVA_MIN = 25       # GHIDRA_LINE.GHIDRA_MIN_MINOR(12.2)가 바라는 JDK — Ghidra 가 없을 때의 안내에 쓴다
 # 자식에게 더 주는 값(있으면 좋은 것) — 지휘자의 손(client)은 자식이 initialize 전에 끝나면 REA_* 없이 다시 띄운다
 CHILD_ENV = {"REA_MCP_OUTPUT_SCHEMA_PROFILE": "off", "NO_UPDATE_NOTIFIER": "1"}
