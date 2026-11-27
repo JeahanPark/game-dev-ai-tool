@@ -52,6 +52,7 @@ class FakeSession(EngineSession):
         self._lines: deque[str] | None = None       # 도는 턴의 남은 줄(턴 밖이면 None)
         self._arrived = asyncio.Event()             # 도는 턴에 글이 들어왔다(`!wait` 를 깨운다)
         self._context_hidden = False                # 압축 뒤 다음 턴까지 문맥 크기를 모른다(compact_blind)
+        self._later: list[str] = []                 # `!later` 로 다음 턴에 미뤄 둔 줄
 
     @property
     def running(self) -> bool:
@@ -88,7 +89,9 @@ class FakeSession(EngineSession):
             self._interrupted.clear()
             self._arrived.clear()
             self._context_hidden = False             # 턴이 돌면 문맥 크기를 다시 안다
-            self._lines = deque(text.splitlines())
+            # `!later <명령>` 으로 미뤄 둔 줄은 다음 턴의 맨 앞에서 돈다(지휘자가 같은 일을 이어 부르는 턴의 행동을 시험이 정한다).
+            self._lines = deque([*self._later, *text.splitlines()])
+            self._later = []
             started = time.monotonic()
             self.engine.turn_log.append({"role": self.spec.role, "session_id": self.session_id,
                                          "text": text, "images": list(images)})
@@ -106,6 +109,9 @@ class FakeSession(EngineSession):
                     continue
                 command, _, argument = line.partition(" ")
                 argument = argument.strip()
+                if command == "!later":
+                    self._later.append(argument)
+                    continue
                 if command == "!fail":
                     self._lines = None
                     yield EngineEvent("error", {"message": argument or "가짜 엔진 오류"})

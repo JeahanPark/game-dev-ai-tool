@@ -25,6 +25,7 @@ _REFS = re.compile(r"\[(E\d{1,4}(?:[ \t]*[,·][ \t]*E\d{1,4}){0,20})\]")        
 _URL = re.compile(r"https?://[^\s<>\"'）)\]]+")
 _HEAD = re.compile(r"^-[ \t]*(조사 번호|증거)[ \t]*:[ \t]*([^\n]*)$", re.MULTILINE)      # 줄 안에서만 — 빈칸 · 빈 줄이 길어도 한 번에 지나간다
 _MARK = re.compile(r"^\((?:추천|좋아요|조회)[^)\n]{0,20}\)[ \t]*")                 # 증거 글의 댓글 줄 머리 「(추천 13) 」
+_CODE = re.compile(r"`[^`\n]{0,200}`")                                             # 코드 표시 한 토막(줄 안에서만 · 길이 상한)
 
 
 def is_brief(path) -> bool:
@@ -58,6 +59,19 @@ def _inside(root: Path, value) -> Path | None:
     except (ValueError, OSError):
         return None
     return full
+
+
+def _declares(path: Path) -> bool:
+    """그 글의 앞머리(4KB 안)에 보고의 머리 두 줄 — 「- 조사 번호: r-…」 와 「- 증거: …」 — 이 다 있는가(레퍼런스 조사의 보고라고
+    스스로 밝힌 글). 조사 번호 한 줄만 적은 글(인계 · 메모)은 보고로 보지 않는다 — 「맞지 않음」이 엉뚱한 글에 붙는다."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(4096).decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    found = _HEAD.findall(head)
+    return (any(name == "조사 번호" and _RUN_ID.fullmatch(value.strip().strip("`")) for name, value in found)
+            and any(name == "증거" and value.strip() for name, value in found))
 
 
 def _read_small(path: Path, limit: int) -> bytes | None:
@@ -135,14 +149,16 @@ def check(root, brief_path) -> dict:
         notes.append("이 PC 에 받은 기록이 없다 — 증거가 프로그램이 받은 그대로인지는 확인하지 못했다")
     elif record.get("sha256") != hashlib.sha256(raw).hexdigest():
         errors.append("증거 파일이 받은 뒤 바뀌었다(받은 때의 값과 다르다)")
-    # 절을 가른다: 「보충 출처」는 역할이 직접 본 주소를 적는 곳 · 「쓰는 규칙」은 틀의 안내(보기로 적은 `[E3]` · 주소가 있다).
-    # 그 둘은 꼭 있어야 할 절로 세지 않는다 — 「발견과 보충 출처」 같은 이름으로 두 몫을 하게 두지 않는다.
-    main, extra, headings = [], [], []
+    # 절을 가른다: 「보충 출처」는 역할이 직접 본 주소를 적는 곳 · 「쓰는 규칙」은 틀의 안내(보기로 적은 `[E3]` 이 있다).
+    # 그 둘은 꼭 있어야 할 절로 세지 않는다 — 「발견과 보충 출처」 같은 이름으로 두 몫을 하게 두지 않는다. 「쓰는 규칙」 절도
+    # 번호 · 주소 · 따온 말은 본다(통째로 건너뛰면 그 이름의 절 아래에 지어낸 것을 숨길 수 있다 — 11-27 다른 눈의 검수).
+    # 틀의 보기는 코드 표시(`…`) 안에 있어서, 그 절에서만 코드 표시 안을 빼고 본다.
+    main, extra, rules, headings = [], [], [], []
     bucket = main
     for line in body.splitlines():
         if line.startswith("## "):
             name = line[3:].strip()
-            bucket = extra if "보충 출처" in name else [] if "쓰는 규칙" in name else main
+            bucket = extra if "보충 출처" in name else rules if "쓰는 규칙" in name else main
             if bucket is main:
                 headings.append(name)
         if line.startswith("> **쓰는 법**"):
@@ -152,12 +168,14 @@ def check(root, brief_path) -> dict:
         if not any(key in heading for heading in headings):
             errors.append(f"「{name}」 절이 없다")
     main_text, extra_text = "\n".join(main), "\n".join(extra)
+    rules_text = "\n".join(_CODE.sub("", line) for line in rules)
 
     def refs(body_text: str) -> set[str]:
         return {name for group in _REFS.findall(body_text) for name in re.findall(r"E\d{1,4}", group)}
     used = sorted(refs(main_text), key=lambda name: int(name[1:]))
     result["refs"] = len(used)
-    missing = sorted({name for name in refs(main_text) | refs(extra_text) if name not in items}, key=lambda name: int(name[1:]))
+    missing = sorted({name for name in refs(main_text) | refs(extra_text) | refs(rules_text) if name not in items},
+                     key=lambda name: int(name[1:]))
     if missing:
         errors.append(f"증거에 없는 번호다: {' · '.join(missing[:10])}")
     if data.get("state") == "nothing-solid":
@@ -169,12 +187,12 @@ def check(root, brief_path) -> dict:
     known |= {_same(comment["url"]) for row in items.values() for comment in row["comments"] if comment["url"]}
     extra_urls = {_same(url) for url in _urls(extra_text)}
     result["extra"] = len(extra_urls)
-    strangers = sorted({url for url in _urls(main_text) if _same(url) not in known | extra_urls})
+    strangers = sorted({url for url in _urls(main_text) + _urls(rules_text) if _same(url) not in known | extra_urls})
     if strangers:
         errors.append("증거에도 「보충 출처」에도 없는 주소다: " + " · ".join(strangers[:5]))
     corpus = text.norm("\n".join(part for row in items.values() for part in (
         row["title"], row["text"], *row["highlights"], *(comment["text"] for comment in row["comments"]))))
-    quotes = [quote for quote in (_quote(line) for line in main if line.startswith(">")) if quote]
+    quotes = [quote for quote in (_quote(line) for line in [*main, *rules] if line.startswith(">")) if quote]
     loose = [quote for quote in quotes if quote not in corpus]
     if loose:
         errors.append(f"따온 말이 증거에 그대로 없다: 「{loose[0][:60]}」" + (f" 외 {len(loose) - 1}개" if len(loose) > 1 else ""))
@@ -207,12 +225,16 @@ def lines(root, paths) -> list[str]:
     out, seen = [], set()
     for path in paths:
         shown = str(path).replace("\\", "/")
-        if not is_brief(shown):
+        if not shown.lower().endswith(".md"):
             continue
         full = _inside(Path(root), path)
         if full is None or full in seen:
             continue
         seen.add(full)
+        # 보고는 자리(…/조사/<폴더>/보고.md)나 머리의 「- 조사 번호: r-…」 줄로 알아본다 — 총괄이 다른 자리에 쓰라고 맡기면 역할은
+        # 그 자리에 쓴다(11-27 진짜 세션: 머리와 절은 맞게 썼는데 자리가 달라 확인 줄이 빠졌다).
+        if not is_brief(shown) and not _declares(full):
+            continue
         try:
             shown = full.relative_to(Path(root).resolve()).as_posix()
             out.append(line({**check(root, full), "path": shown}))

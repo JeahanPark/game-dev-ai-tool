@@ -372,7 +372,7 @@ def _research(paths, args):
     """레퍼런스 조사의 사람 쪽 명령 — 출처를 보고 켜고 끈다 · 지난 조사와 보고의 형식을 본다(지휘자가 떠 있지 않아도 된다)."""
     from .research import check, consent, sources
     if args.action == "run":
-        print("오류: 조사는 총괄 세션이 청한다 — 화면에서 총괄에게 조사를 시킨다", file=sys.stderr)
+        print("오류: 조사는 지휘자가 연 세션(총괄 · 맡은 일을 하는 역할)이 청한다 — 화면에서 총괄에게 조사를 시킨다", file=sys.stderr)
         return 1
     if args.action in ("allow", "deny"):
         on = (consent.allow if args.action == "allow" else consent.deny)(paths.root, args.sources)
@@ -412,8 +412,8 @@ def _research(paths, args):
             print("(조사가 없다)")
         return 0
     brief = args.brief if args.brief.is_absolute() else paths.root / args.brief
-    if not check.is_brief(brief) or not brief.is_file():
-        print("오류: 조사 보고를 준다 — `…/조사/<폴더>/보고.md` 꼴의 있는 파일", file=sys.stderr)
+    if brief.suffix.lower() != ".md" or not brief.is_file():
+        print("오류: 조사 보고를 준다 — 있는 글 파일(.md · 흔히 `…/조사/<폴더>/보고.md`)", file=sys.stderr)
         return 1
     try:
         shown = brief.resolve().relative_to(paths.root.resolve()).as_posix()

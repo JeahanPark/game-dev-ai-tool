@@ -135,6 +135,7 @@ def build(plan, results, *, today, run_id: str, created_at: str) -> dict:
     queries, number, warnings = [], 0, []
     per_source: dict[str, dict] = {name: {"source": name, "statuses": [], "received": 0, "kept": 0, "details": [],
                                            "requests": 0, "sent": sent.get(name, [])} for name in plan_mod.sources(plan)}
+    taken: set[tuple[str, str]] = set()
     for index, query in enumerate(plan.queries):
         mine = [result for result in results if result.query == index]
         merged: dict[tuple[str, str], Item] = {}
@@ -150,13 +151,23 @@ def build(plan, results, *, today, run_id: str, created_at: str) -> dict:
         if dropped:
             warnings.append(f"갈래 「{query.label}」: 기간(지난 {plan.window_days}일) 밖이라 뺀 것 {dropped}건")
         solid = [row for row in inside if row["relevance"] >= score.RELEVANCE_FLOOR]
-        kept = _pick(solid, query, keep)
+        # 앞 갈래에 이미 실은 글은 다시 싣지 않는다 — 같은 글이 번호 둘로 실리면 읽는 쪽이 별개의 증거로 센다(11-27 진짜 세션).
+        fresh = [row for row in solid if (row["source"], row["native_id"]) not in taken]
+        overlap = len(solid) - len(fresh)
+        if overlap:
+            warnings.append(f"갈래 「{query.label}」: 앞 갈래와 겹친 것 {overlap}건은 앞 갈래에만 실었다")
+        # 낱말과 맞지 않아 빠진 것 — 앞 갈래에 이미 실린 글은 여기서도 뺀다(「가까웠던 것」에 E1 의 주소를 다시 적지 않는다).
+        weak = [row for row in inside if row["relevance"] < score.RELEVANCE_FLOOR and (row["source"], row["native_id"]) not in taken]
+        kept = _pick(fresh, query, keep)
+        taken.update((row["source"], row["native_id"]) for row in kept)
         for row in kept:
             number += 1
             row["eid"] = f"E{number}"
-        closest = [] if kept else sorted(inside, key=lambda row: (-(row["engagement"] or 0.0), -row["relevance"], row["native_id"]))[:3]
-        if not kept and inside:
-            warnings.append(f"갈래 「{query.label}」: 받은 {len(inside)}건이 모두 고르는 낱말과 맞지 않았다 — 낱말을 넓혀 다시 조사한다")
+        closest = [] if kept else sorted(weak, key=lambda row: (-(row["engagement"] or 0.0), -row["relevance"], row["native_id"]))[:3]
+        if not kept and weak:
+            # 고른 글이 모두 앞 갈래와 겹쳐서 빈 갈래에는 이 말을 적지 않는다 — 낱말이 안 맞은 것이 아니다(11-27 다른 눈의 검수).
+            warnings.append(f"갈래 「{query.label}」: {'겹치지 않은' if overlap else '받은'} {len(weak)}건이 모두 고르는 낱말과 맞지 않았다"
+                            " — 낱말을 넓혀 다시 조사한다")
         tally = per_source[query.source]
         tally["statuses"].extend(result.status for result in mine) if mine else tally["statuses"].append("error")
         tally["received"] += len(rows)
@@ -167,7 +178,7 @@ def build(plan, results, *, today, run_id: str, created_at: str) -> dict:
             tally["details"].append(f"갈래 「{query.label}」: 받지 못했다(결과가 없다)")
         queries.append({"label": query.label, "source": query.source, "targets": list(query.targets), "search": list(query.search),
                         "rank": list(query.rank), "received": len(rows), "outside": dropped, "kept": len(kept), "items": kept,
-                        "closest": closest})
+                        "overlap": overlap, "closest": closest})
     sources = []
     for name, tally in per_source.items():
         status = _source_status(tally["statuses"])
@@ -267,7 +278,10 @@ def render_md(bundle: dict) -> str:
         body += ["", f"## 갈래 {index} — {entry['label']}({entry['source']} · 고르는 낱말: {_one_line(' · '.join(entry['rank']), 120)})"]
         for row in entry["items"]:
             body += [""] + _item_lines(row, entry["rank"], budget)
-        if not entry["items"]:
+        if not entry["items"] and entry.get("overlap"):
+            # 낱말에 맞은 글이 모두 앞 갈래에 이미 실렸다 — 「찾지 못함」이 아니다(앞 갈래의 그 증거가 이 갈래의 물음에도 닿는다).
+            body += ["", f"이 갈래에서 고른 글 {entry['overlap']}건은 모두 앞 갈래에 실려 있다(새로 실은 것은 없다 — 앞 갈래의 증거를 같이 본다)."]
+        elif not entry["items"]:
             body += ["", "이 갈래는 남은 증거가 없다(찾지 못함)."]
             for row in entry["closest"]:
                 body += [f"- 가장 가까웠던 것(증거로 쓰지 않는다): {row['url']}", f"  > 제목: {_one_line(row['title'], 100)}"]
