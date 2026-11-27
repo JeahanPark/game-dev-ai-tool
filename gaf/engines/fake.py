@@ -158,6 +158,7 @@ class FakeSession(EngineSession):
                     try:
                         if command == "!write":
                             filename, _, content = argument.partition(" ")
+                            content = content.replace("⏎", "\n")          # 여러 줄 파일은 ⏎ 로 줄을 나눠 적는다(명령은 한 줄이라서)
                             if not filename:
                                 raise ValueError("!write에 파일 경로가 없다")
                             ok, excerpt = await self._gate("Write", {"file_path": filename, "content": content})

@@ -16,8 +16,8 @@
 | 칸 | 글 수 | 바탕이 된 원문 | 어떻게 옮겼나 |
 |---|---|---|---|
 | `roles/` 역할 | 49 | `.claude/agents/*.md` 49개 | 한국어로 고쳐 썼다 |
-| `procedures/` 절차 | 22 | `.claude/skills/` 의 스킬 78개 가운데 72개 | 주제 22개로 묶어 한국어로 고쳐 썼다 |
-| `templates/` 문서 틀 | 68 | `.claude/docs/templates/` 의 파일 74개(글 70개 + 웹 게임 시작 틀의 코드 · 설정 파일 4개) 가운데 글 67개 | 한국어로 고쳐 썼다. `feature-map` 하나는 이 틀에서 쓴 글이다 |
+| `procedures/` 절차 | 23 | `.claude/skills/` 의 스킬 78개 가운데 72개 | 주제 22개로 묶어 한국어로 고쳐 썼다. `reference-research` 하나는 이 틀에서 쓴 글이다 |
+| `templates/` 문서 틀 | 69 | `.claude/docs/templates/` 의 파일 74개(글 70개 + 웹 게임 시작 틀의 코드 · 설정 파일 4개) 가운데 글 67개 | 한국어로 고쳐 썼다. `feature-map` · `research-brief` 둘은 이 틀에서 쓴 글이다 |
 | `rules/` 규칙 | 21 | `.claude/rules/*.md` 14개 · `.claude/docs/director-gates.md` 와 `director-gates/` 의 28개 | 한국어로 고쳐 썼다(검토 질문 28개는 분야 일곱으로 묶었다) |
 | `genres/` 장르 시트 | 72 | `.claude/genres/chipsets/*.md` 69개 · `.claude/genres/` 의 공통 글 3개 | 한국어로 고쳐 썼다 |
 | `engines/` 엔진 참조 | 52 | `docs/engine-reference/<godot·unity·unreal·web>/` 의 글 48개 | **받은 그대로 둔 영어 글**이다 — 맨 위에 머리말과 알림 한 줄만 붙였다. 엔진마다의 `read-first` 4개는 원문 `VERSION.md` 와 전수검사의 지적을 한국어로 정리한 글이다 |

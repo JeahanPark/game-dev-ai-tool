@@ -32,6 +32,11 @@ SECRET_REASON = "접근 값 파일과 이 도구가 제한하는 지휘자 경�
 # 알아볼 수 있는 꼴만 막는다(`env -i` · 스크립트로 지우는 것은 못 막는다 — 설계 §7 의 한계).
 _SESSION_TOKEN = re.compile(r"GAF_SESSION", re.IGNORECASE)
 SESSION_REASON = "세션의 표(GAF_SESSION)를 읽거나 지우거나 바꾸는 명령은 세션이 하지 않는다 — 누가 친 명령인지 지휘자가 그 표로 가린다"
+# 레퍼런스 조사의 출처 허락(1.15.0)은 사람이 한다 — 세션이 셸에서 그 함수 · 명령을 직접 부르는 꼴을 막는다. 이름으로만 본다:
+# 꾸며 쓴 명령까지 막지는 못한다(접근 값 폴더의 다른 파일과 같은 한계 · 11-27 다른 눈의 검수).
+_RESEARCH_CONSENT = re.compile(r"gaf\.research[\s\S]{0,80}consent"
+                               r"|\bgaf\b[\s\S]{0,20}\bresearch\s+(?:allow|deny)\b", re.IGNORECASE)
+RESEARCH_REASON = "레퍼런스 조사의 출처를 켜고 끄는 것은 사람이 한다(화면의 승인 카드 · 사람의 터미널) — 세션은 조사를 청하기만 한다"
 # PC 를 사설망 · 인터넷에 여는 일(Tailscale 의 serve · funnel · 설정)은 사람이 한다(11-16 공개 길) — 세션이 스스로 넘김을 걸면
 # 등록한 기기만 들이는 문은 그대로여도, 공개 문의 따로 둔 한도를 비켜 지휘자의 본 포트가 인터넷에 놓인다.
 # 읽기만 하는 것(`tailscale status` · `ip` · `version`)은 그대로 둔다. 알아볼 수 있는 꼴만 막는다(스크립트 속의 호출은 못 막는다).
@@ -906,6 +911,8 @@ def check_tool(tool_name, tool_input, *, write, root, bash_deny) -> tuple[bool, 
             return False, "Custom 은 세션이 고치지 않는다 — 총괄의 custom 청을 사람이 승인하거나 화면에서 고친다"
         if _SESSION_TOKEN.search(command):
             return False, SESSION_REASON
+        if _RESEARCH_CONSENT.search(command):
+            return False, RESEARCH_REASON
         if _TAILNET_COMMAND.search(command):
             return False, TAILNET_REASON
         pattern = bash_denied(command, bash_deny)

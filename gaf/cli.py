@@ -29,7 +29,7 @@ from .server import IMAGE_LIMIT, IMAGE_TYPES, Server
 STATUS_WORDS = {"idle": "쉼", "working": "일하는 중", "waiting": "기다림", "blocked": "막힘", "off": "꺼짐"}
 TOOL_TIMEOUT = 90           # 총괄 명령을 기다리는 시간(초) — stop 은 도는 턴이 끝나기를 30초까지 기다린다
 SHUTDOWN_WAIT_STEP = 2.0     # 비었는지 다시 청하는 간격(초)
-SESSION_ONLY = "team · send(= SendMessage) · assign · tell · result · ask · show · commit · push · custom · stop <역할> · role new|off|on|reset · library list|show|take · check list|add|remove · job run|list|out|stop"
+SESSION_ONLY = "team · send(= SendMessage) · assign · tell · result · ask · show · commit · push · custom · stop <역할> · role new|off|on|reset · library list|show|take · check list|add|remove · job run|list|out|stop · research run"
 PORT_IN_USE = (48, 98, 10048)   # 「주소를 이미 쓰고 있다」의 오류 번호(macOS · Linux · Windows)
 START_LOCK_SECONDS = 30          # 같은 프로젝트의 다른 serve 가 뜨는 것을 기다리는 시간
 WIKI_IGNORE = "wiki/.obsidian/workspace*.json"
@@ -245,6 +245,18 @@ def _parser():
     out.add_argument("--lines", type=int, default=40, metavar="N")
     stop = command("stop", "배경 일을 멈춘다", actions)
     stop.add_argument("job", metavar="번호")
+    from .research.plan import SOURCES as research_sources
+    research = commands.add_parser("research", help="레퍼런스 조사 — 출처를 보고 켜고 끈다 · 지난 조사와 보고의 형식을 본다")
+    actions = research.add_subparsers(dest="action", required=True, title="레퍼런스 조사 명령")
+    command("sources", "출처마다 어디로 무엇을 보내는지와 이 프로젝트에 켰는지를 본다", actions)
+    for name, text in (("allow", "출처를 이 PC 에서 이 프로젝트에 켠다(사람만)"), ("deny", "출처를 끈다(사람만)")):
+        change = command(name, text, actions)
+        change.add_argument("sources", nargs="+", choices=list(research_sources), metavar="출처")
+    command("list", "지난 조사를 새것부터 본다", actions)
+    check = command("check", "조사 보고(…/조사/<폴더>/보고.md)의 형식을 본다 — 번호 · 주소 · 따온 말이 증거에 있는가만", actions)
+    check.add_argument("brief", type=Path, metavar="보고.md")
+    run = command("run", "레퍼런스 조사를 청한다(총괄 세션)", actions)
+    run.add_argument("--file", type=Path, required=True, metavar="계획 JSON 파일")
     return parser
 
 
@@ -354,6 +366,66 @@ def _checks(paths, args):
     _, trusted = change_check(paths, kind, check)
     print("기본 검사를 바꿨다." + (" 함께 믿었다." if trusted else " `gaf hooks trust` 로 전체를 확인하라."))
     return 0
+
+
+def _research(paths, args):
+    """레퍼런스 조사의 사람 쪽 명령 — 출처를 보고 켜고 끈다 · 지난 조사와 보고의 형식을 본다(지휘자가 떠 있지 않아도 된다)."""
+    from .research import check, consent, sources
+    if args.action == "run":
+        print("오류: 조사는 총괄 세션이 청한다 — 화면에서 총괄에게 조사를 시킨다", file=sys.stderr)
+        return 1
+    if args.action in ("allow", "deny"):
+        on = (consent.allow if args.action == "allow" else consent.deny)(paths.root, args.sources)
+        print(f"{' · '.join(dict.fromkeys(args.sources))} 를 이 PC 에서 이 프로젝트에 {'켰다' if args.action == 'allow' else '껐다'}. "
+              f"지금 켜진 출처: {' · '.join(on) or '없음'}")
+        if args.action == "allow" and "youtube" in args.sources and not sources.youtube.available():
+            print("YouTube 를 받는 도구 yt-dlp 를 이 프로그램에 깐다. 잠시 기다린다")
+            if not sources.youtube.install():
+                print("오류: yt-dlp 를 깔지 못했다 — 인터넷을 확인하고 같은 명령을 다시 친다(출처는 켜 둔 그대로다)", file=sys.stderr)
+                return 1
+            print("yt-dlp 를 깔았다.")
+        return 0
+    if args.action == "sources":
+        on = consent.allowed(paths.root)
+        for row in sources.describe_all():
+            print(f"{row['name']}({row['label']}): {'켜짐' if row['name'] in on else '꺼짐'}")
+            print(f"  받는 법: {row['how']}")
+            print(f"  보내는 것: {row['sends']} → {' · '.join(row['hosts'])}")
+            print(f"  약관: {row['terms']}")
+            if row["needs"]:
+                print(f"  필요한 것: {row['needs']}")
+        print("켜기: gaf research allow <출처>… · 끄기: gaf research deny <출처>… (처음 조사할 때 화면의 승인으로도 켜진다 — 이 PC 의 이 프로젝트에만)")
+        return 0
+    if args.action == "list":
+        rows = []
+        for path in (paths.state_dir / "research").glob("r-*.json"):
+            try:
+                row = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(row, dict) and all(isinstance(row.get(key), str) for key in ("id", "topic", "dir")):
+                rows.append(row)
+        words = {"ok": "넉넉함", "thin": "얇음", "nothing-solid": "찾지 못함"}
+        for row in sorted(rows, key=lambda row: row["id"], reverse=True)[:50]:
+            print(f"{row['id']} 「{row['topic']}」 — {words.get(row.get('state'), row.get('state'))} · 증거 {row.get('items')}건 · {row['dir']}/증거.md")
+        if not rows:
+            print("(조사가 없다)")
+        return 0
+    brief = args.brief if args.brief.is_absolute() else paths.root / args.brief
+    if not check.is_brief(brief) or not brief.is_file():
+        print("오류: 조사 보고를 준다 — `…/조사/<폴더>/보고.md` 꼴의 있는 파일", file=sys.stderr)
+        return 1
+    try:
+        shown = brief.resolve().relative_to(paths.root.resolve()).as_posix()
+    except ValueError:
+        shown = brief.as_posix()
+    try:
+        result = {**check.check(paths.root, brief), "path": shown}
+    except (OSError, UnicodeError) as exc:
+        print(f"오류: 보고를 읽지 못했다({type(exc).__name__})", file=sys.stderr)
+        return 1
+    print(check.line(result))
+    return 0 if result["ok"] else 1
 
 
 def _reviews(paths, args):
@@ -791,6 +863,16 @@ def _tool_request(args):
         return "push", {}
     if command == "custom":
         return "custom", {"scope": args.scope, "role": args.role, "text": _body(args.text, args.file), "why": args.why}
+    if command == "research":
+        if args.action != "run":
+            return None                          # 출처를 켜고 끄는 것 · 보는 것은 사람만 한다
+        try:
+            plan = json.loads(_body(None, args.file))
+        except ValueError:
+            plan = None
+        if not isinstance(plan, dict):
+            raise InputError("오류: 계획 파일은 JSON 객체여야 한다(topic · purpose · queries · window_days · depth)")
+        return "research", plan
     if command == "job":
         if args.action == "run":
             return "job_run", {"command": _body(args.job_command, args.file), "name": args.name, "cwd": args.cwd,
@@ -1363,6 +1445,8 @@ def main(argv: list[str] | None = None) -> int:
             return _checks(paths, args)
         if args.command == "review":
             return _reviews(paths, args)
+        if args.command == "research":
+            return _research(paths, args)
         if args.command == "projects":
             return _projects(args)
         if args.command == "remote":

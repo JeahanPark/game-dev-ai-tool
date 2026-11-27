@@ -21,5 +21,8 @@
 | 옵시디언 — 깔겠다고 할 때만 | winget(Obsidian.Obsidian) · obsidian.md | 무료 앱(회사 일에도 무료 — 2025-02-20부터) · obsidian.md 의 약관 |
 | 음성 입력 부품(faster-whisper 등) — 켤 때만 | PyPI | 각 부품의 라이선스(대부분 MIT) · NVIDIA 그래픽 부품은 NVIDIA 라이선스 |
 | Tailscale — 폰 · 다른 PC 에서 쓰기를 켤 때만 | tailscale.com | 무료 요금제는 개인 · 비상업용이다 — 회사 일에 쓰면 유료 요금제를 살핀다 |
+| `yt-dlp`(영상 정보를 받는 도구) — 레퍼런스 조사에서 YouTube 출처를 켤 때만 | PyPI | Unlicense(공개 도메인). YouTube 를 쓰는 조건은 YouTube 의 약관을 따른다 — 그 약관은 자동 접근을 막는다(승인 카드에 적혀 있다) |
+
+레퍼런스 조사(1.15.0)가 켰을 때 부르는 바깥 서비스: Reddit 의 글은 공개 아카이브 **Arctic Shift**(`arctic-shift.photon-reddit.com` — 운영자의 안내 「free service, be considerate」 · 이 프로그램은 요청 사이를 3초 두고 조사 하나에 서른 번까지만 부른다)에서, YouTube 의 영상 정보는 yt-dlp 가 YouTube 에서 받는다. 두 곳 다 로그인 · 쿠키 없이 부르고, 받은 글의 권리는 글쓴이와 그 서비스에 있다 — 프로그램은 발췌를 이 PC 의 프로젝트 폴더에만 두고 기본으로 git 에 올리지 않는다.
 
 Claude · Anthropic, ChatGPT · Codex · OpenAI, Obsidian, Tailscale 은 각 회사의 상표다. 이 프로그램은 그 회사들과 관계가 없다.

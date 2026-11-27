@@ -940,7 +940,8 @@ function actionCard(decision) {
   const check = action.kind === 'check_add' || action.kind === 'check_remove';
   const review = action.kind === 'review_add' || action.kind === 'review_remove';
   const head = action.kind === 'custom' ? 'Custom 청' : check ? '기본 검사 ' + (action.kind === 'check_add' ? '추가' : '제거') + ' 청'
-    : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청' : commit ? '커밋 청' : '푸시 청';
+    : review ? '기본 검토 ' + (action.kind === 'review_add' ? '추가' : '제거') + ' 청' : commit ? '커밋 청'
+    : action.kind === 'research' ? '레퍼런스 조사 청' : '푸시 청';
   card.append(node('strong', head + ' · ' + decision.from));
   const list = node('div', null, 'action-list');
   if (action.kind === 'custom') {
@@ -960,6 +961,13 @@ function actionCard(decision) {
       node('p', '볼 파일: ' + (r.files.join(', ') || '(따로 없다 — 바뀐 파일과 답)')), node('p', '기준: ' + (r.brief || '(맡긴 일의 끝 기준)')),
       node('p', '가벼운 검토(첫 검토자 하나): ' + (small ? small + ' 미만일 때' : '없음 — 늘 전체 검토') + ' · 나란히 견주기: ' + (r.keep_going ? '함' : '안 함')),
       node('p', '왜: ' + action.why));
+  } else if (action.kind === 'research') {
+    // 레퍼런스 조사(1.15.0): 승인하면 이 PC 에서 이 프로젝트에 그 출처를 켜고 조사를 시작한다 — 다음부터는 묻지 않는다
+    card.append(node('p', '주제: ' + action.topic + ' · 쓸 곳: ' + action.purpose),
+      node('p', '승인하면 이 PC 에서 이 프로젝트에 아래 출처를 켜고 조사를 시작한다(다음부터는 묻지 않는다 · 끄기: gaf research deny).'));
+    for (const s of action.sources) list.append(node('p', s.label + ' — ' + s.how),
+      node('p', '보내는 것: ' + (action.sent[s.name] || []).join(' · ')), node('small', '약관: ' + s.terms + (s.missing ? ' · 승인하면 깐다: ' + s.needs : '')));
+    card.append(list);
   } else if (commit) {
     const counts = action.counts, words = {new:'새', modified:'고침', deleted:'지움'};
     const total = counts.new + counts.modified + counts.deleted;
