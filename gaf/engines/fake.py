@@ -26,6 +26,9 @@ class FakeEngine(Engine):
         self.compact_to: int | None = 400   # 압축 뒤 문맥 토큰 · None 이면 압축을 못 한다
         self.compact_fail: str = ""
         self.compact_wait: float = 0.0
+        self.compact_blind: bool = False    # 시험용: 압축 뒤의 문맥 크기를 그 세션의 다음 턴까지 모른다(Codex 처럼 — context() 가 None)
+        self.compact_says: int | None = None  # 시험용: 압축이 알려 주는 크기(post_tokens) — Codex 는 지시문 · 도구가 빠진 「줄인 대화」의
+        #                                       크기를 준다(압축 뒤의 문맥 compact_to 보다 작다). None 이면 compact_to 와 같다
         self.compact_log: list[dict] = []
         self.fail_open = 0          # 시험용: 남은 횟수만큼 open() 이 실패한다
         self.fail_send = 0          # 시험용: 남은 횟수만큼 send() 가 NotRunning 을 낸다(턴이 막 끝난 것처럼)
@@ -48,6 +51,7 @@ class FakeSession(EngineSession):
         self._lock = asyncio.Lock()
         self._lines: deque[str] | None = None       # 도는 턴의 남은 줄(턴 밖이면 None)
         self._arrived = asyncio.Event()             # 도는 턴에 글이 들어왔다(`!wait` 를 깨운다)
+        self._context_hidden = False                # 압축 뒤 다음 턴까지 문맥 크기를 모른다(compact_blind)
 
     @property
     def running(self) -> bool:
@@ -83,6 +87,7 @@ class FakeSession(EngineSession):
                 raise RuntimeError("이미 닫은 세션이다")
             self._interrupted.clear()
             self._arrived.clear()
+            self._context_hidden = False             # 턴이 돌면 문맥 크기를 다시 안다
             self._lines = deque(text.splitlines())
             started = time.monotonic()
             self.engine.turn_log.append({"role": self.spec.role, "session_id": self.session_id,
@@ -215,7 +220,7 @@ class FakeSession(EngineSession):
         self._interrupted.set()
 
     async def context(self) -> dict | None:
-        if not self._opened or self._closed:
+        if not self._opened or self._closed or self._context_hidden:
             return None
         return {"tokens": self.engine.context_tokens, "max": 200000,
                 "pct": self.engine.context_tokens / 200000 * 100}
@@ -232,7 +237,9 @@ class FakeSession(EngineSession):
             if engine.compact_to is None:
                 return None
             before, engine.context_tokens = engine.context_tokens, engine.compact_to
-            return {"pre_tokens": before, "post_tokens": engine.compact_to}
+            self._context_hidden = engine.compact_blind
+            says = engine.compact_to if engine.compact_says is None else engine.compact_says
+            return {"pre_tokens": before, "post_tokens": says}
 
     async def close(self) -> None:
         self._closed = True

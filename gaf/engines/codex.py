@@ -39,6 +39,9 @@ STEER_TIMEOUT = 30              # 도는 턴에 글을 넣는 요청(turn/steer)
 TOOL_TIMEOUT = 90.0             # 우리 도구 하나(지휘자의 handler)의 답을 기다리는 시간(초) — 셸 명령 길(gaf/cli.py)과 같다
 ACCOUNT_TIMEOUT = 30.0          # 세션 없는 계정 조회의 읽기 제한 시간(초)
 ACCOUNT_CLOSE_TIMEOUT = 10.0    # 그 뒤 app-server 를 닫는 데 적어도 주는 시간(초) — 읽기가 시간을 다 써도 프로세스를 남기지 않게(30분마다 돈다)
+COMPACT_FIND = 30.0             # 압축을 청한 뒤 그 턴의 첫 알림을 기다리는 시간(초) — 진짜 세션에서는 곧바로 왔다(11-27 실측 17.58)
+COMPACT_POLL = 0.05             # 압축 턴의 알림을 보는 간격(초)
+COMPACT_HALT = 5.0              # 거둔 압축의 턴을 멈추라고 청하고 그 답을 기다리는 시간(초)
 CANNOT_ASK = ("이 세션은 사용자에게 물을 수 없다. 가장 그럴듯한 쪽으로 정하고 보고에 「스스로 정한 것」으로 적어라. "
               "정말 못 정하면 마지막 답의 첫 줄을 「막힘: <이유>」로 써라.")
 WINDOWS = {10080: "seven_day", 300: "five_hour"}        # 한도 창 길이(분) → 지휘자가 쓰는 이름
@@ -92,6 +95,59 @@ class _Turn:
     interrupt_sent: bool = False
     compacted: bool = False
     open_tools: set = field(default_factory=set)
+
+
+@dataclass
+class _Compaction:
+    """압축 한 번을 기다리는 동안 모으는 것."""
+
+    turn_id: str | None = None             # 압축을 청한 뒤 이 스레드에 새로 생긴 턴(압축 턴)
+    cursor: int = 0                        # 그 턴의 알림 줄에서 다음에 볼 자리
+    marker: bool = False                   # 압축 항목(contextCompaction)이 끝났다 · 또는 thread/compacted 가 왔다
+    usage: dict | None = None              # 압축 턴이 알려 준 사용량(압축 뒤의 문맥 크기)
+    status: str | None = None              # 턴이 끝난 상태 — None 이면 아직 돈다
+    error: str = ""
+
+    def take(self, notes: list[tuple[str, Any]]) -> bool:
+        """압축 턴의 알림들을 받아 적는다. 턴이 끝났으면 True."""
+        for method, payload in notes:
+            if isinstance(payload, BaseException):       # 읽는 쪽이 죽으면 SDK 가 줄마다 그 예외를 넣는다
+                raise RuntimeError(f"압축을 기다리는 중 연결이 끊겼다 — {type(payload).__name__}: {payload}")
+            if not isinstance(payload, dict):
+                continue
+            if method == "thread/compacted":
+                self.marker = True
+            elif method == "item/completed":
+                item = payload.get("item")
+                self.marker = self.marker or (isinstance(item, dict) and item.get("type") == "contextCompaction")
+            elif method == "thread/tokenUsage/updated":
+                if isinstance(payload.get("tokenUsage"), dict):
+                    self.usage = payload["tokenUsage"]
+            elif method == "error":
+                error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+                if not payload.get("willRetry"):
+                    self.error = str(error.get("message") or self.error)
+            elif method == "turn/completed":
+                done = payload.get("turn") if isinstance(payload.get("turn"), dict) else {}
+                error = done.get("error") if isinstance(done.get("error"), dict) else {}
+                self.status = str(done.get("status") or "")
+                self.error = str(error.get("message") or self.error)
+        return self.status is not None
+
+
+def _compaction_turn(notes: list[tuple[str, Any]]) -> bool:
+    """이 알림들이 압축 턴의 것인가 — 턴 시작으로 열렸거나, 압축 항목 · 압축 알림이 들어 있다."""
+    if not notes:
+        return False
+    if notes[0][0] == "turn/started":
+        return True
+    for method, payload in notes:
+        if method == "thread/compacted":
+            return True
+        item = payload.get("item") if isinstance(payload, dict) else None
+        if method in ("item/started", "item/completed") and isinstance(item, dict) and item.get("type") == "contextCompaction":
+            return True
+    return False
 
 
 # ---------------------------------------------------------------- 순수 함수(SDK 없이 시험한다)
@@ -700,15 +756,102 @@ class CodexSession(EngineSession):
         return {"tokens": tokens, "max": limit, "pct": percent}
 
     async def compact(self, keep: str = "") -> dict[str, Any] | None:
+        """쉬는 대화를 압축하고, 끝난 것을 확인한 뒤 압축 전후의 문맥 크기를 돌려준다(압축 항목 없이 끝났으면 None).
+
+        `thread/compact/start` 는 빈 답만 준다(턴 번호가 없다). 그래서 청하기 **전에** SDK 라우터의 `pending_turn` 으로 이 스레드의
+        턴 알림을 붙들어 둔다 — SDK 가 턴을 시작할 때 쓰는 것과 같은 길이고, 그 안에 있는 동안 라우터는 구독자가 없는 턴의 알림도
+        치우지 않는다(`_message_router._prune_turn_events`). 그 뒤 이 스레드에 새로 생긴 턴의 알림에서 압축 항목(contextCompaction)의
+        끝과 턴의 끝을 본다. 진짜 세션에서 온 차례(11-27 · CLI 0.163.0 · SDK 0.167.2 · 실측 17.58):
+        turn/started → item/started → thread/tokenUsage/updated → item/completed → turn/completed(2.4 ~ 6.9초).
+        `thread/compacted` 는 오지 않았다 — 오는 판이면 같은 표식으로 친다.
+
+        11-16 ~ 11-27 에는 「그 턴을 미리 구독할 길이 없다」고 보고 청하지 않았다(None) — SDK 소스만 읽고 내린 판단이었고 틀렸다
+        (사용자 「알길이 없다라는 말이 안돼는것같아」). keep 은 이 요청이 받는 칸이 없어 쓰지 않는다 — 남길 것은 지휘자가 압축 앞의
+        턴에서 인계에 적게 한다.
+        """
         async with self._lock:
             if self._codex is None or self._thread is None:
                 raise RuntimeError("세션이 열려 있지 않다")
-            # SDK 0.167.2 의 AsyncThread.compact → thread/compact/start 는 빈 답만 주고 턴 번호를 주지 않는다.
-            # ContextCompactedNotification 에는 turnId 가 있어, notification_registry · _message_router 는 이를
-            # 턴별 큐로만 보낸다(next_notification 으로는 못 받는다). 구독하지 않은 턴의 알림은 바로 버린다.
-            # 시작 전에 그 턴을 구독할 길이 없어 완료를 믿고 기다릴 수 없다 — 요청하지 않고 새 세션으로 잇게 한다.
-            # keep 도 이 요청이 받는 칸이 아니므로 쓰지 않는다.
-            return None
+            router = getattr(getattr(getattr(self._codex, "_client", None), "_sync", None), "_router", None)   # SDK 안쪽 값(0.167.2)
+            if not all(hasattr(router, name) for name in ("pending_turn", "_lock", "_turn_states")):
+                raise RuntimeError("이 SDK 에서 압축 턴의 알림을 붙들 길을 찾지 못했다 — 청하지 않았다")
+            before = await self.context()
+            watch = _Compaction()
+            try:
+                with router.pending_turn(self.session_id):         # 들어갈 때 · 나올 때만 잠깐 잠근다 — 그 사이의 알림이 남는다
+                    with router._lock:
+                        known = set(router._turn_states)           # 청하기 전부터 있던 턴 — 압축 턴이 아니다
+                    try:
+                        await self._request(self._codex, "thread/compact/start", {"threadId": self.session_id})
+                        deadline = time.monotonic() + COMPACT_FIND
+                        while not watch.take(self._compact_notes(router, known, watch)):
+                            if watch.turn_id is None and time.monotonic() > deadline:
+                                raise RuntimeError("압축을 청했으나 압축 턴의 알림이 오지 않았다")
+                            await asyncio.sleep(COMPACT_POLL)
+                    except asyncio.CancelledError:
+                        # 요청의 답을 기다리다 거둬져 압축 턴을 아직 못 찾았을 수 있다 — 붙든 것을 놓기 전에 한 번 더 찾는다(멈추라고 청할 번호)
+                        with contextlib.suppress(Exception):
+                            if watch.turn_id is None:
+                                self._compact_notes(router, known, watch)
+                        raise
+            except asyncio.CancelledError:
+                await self._halt_compaction(watch.turn_id)         # 멈춤 · 시간 넘김 — 지휘자는 이어서 이 세션을 닫는다
+                raise
+            if watch.status != "completed":
+                raise RuntimeError(f"압축 턴이 끝까지 가지 못했다({watch.status or '상태 없음'})" + (f" — {watch.error}" if watch.error else ""))
+            if not watch.marker:
+                return None                                        # 압축 항목 없이 끝났다 — 문맥 값은 그대로 둔다
+            # 압축 턴이 알려 준 값은 줄인 대화만의 크기다(지시문 · 도구가 빠진 값 — 진짜 세션: 6,198 뒤의 턴이 13,259 · 실측 17.58).
+            # 「지금 문맥」으로는 쓰지 않는다: 다음 턴의 사용량 알림이 올 때까지 context() 는 모름(None)이다. 압축 전의 값도 남기지 않는다.
+            usage, self._usage = watch.usage, None
+            post = ((usage or {}).get("last") or {}).get("totalTokens") if isinstance((usage or {}).get("last"), dict) else None
+            return {"pre_tokens": (before or {}).get("tokens"), "post_tokens": post if type(post) in (int, float) else None}
+
+    def _compact_notes(self, router: Any, known: set, watch: _Compaction) -> list[tuple[str, Any]]:
+        """압축 턴의 알림 가운데 아직 안 본 것(이름 · 내용). 압축 턴을 아직 못 찾았으면 여기서 찾는다.
+
+        압축 턴 = 청한 뒤 **이 스레드에** 새로 생긴 턴 가운데 첫 알림이 turn/started 이거나 압축 항목이 든 것(`_compaction_turn`).
+        「처음 보인 새 턴」으로 잡지 않는다 — 진짜 라우터는 끝난 턴의 줄을 지우므로 그 턴의 늦은 알림(turn/diff/updated 따위)이 오면
+        새 줄로 다시 생기고, 붙든 동안에는 치워지지도 않는다. 그 줄을 잡으면 끝나지 않는 턴을 기다린다(11-27 다른 눈의 검수).
+        스레드 번호가 없는 줄(SDK 가 모르는 알림)도 잡지 않는다. 읽는 쪽이 죽었으면 그 예외를 알림 자리에 넣어 돌려준다.
+        """
+        with router._lock:                                         # SDK 의 읽는 스레드가 같은 잠금으로 줄을 고친다 — 베끼고 곧 놓는다
+            # 읽는 쪽이 죽으면 SDK 는 붙든 스레드의 칸에 그 예외를 남긴다(압축 턴의 줄이 아직 없을 때는 여기서만 알 수 있다)
+            broken = getattr(router, "_pending_turn_requests", {}).get(self.session_id)
+            if watch.turn_id is None:
+                rows = {turn_id: sorted(state.events.items(), key=lambda pair: pair[0])
+                        for turn_id, state in router._turn_states.items()
+                        if turn_id not in known and getattr(state, "thread_id", None) == self.session_id}
+            else:
+                state = router._turn_states.get(watch.turn_id)
+                rows = {watch.turn_id: sorted(((index, item) for index, item in state.events.items() if index >= watch.cursor),
+                                              key=lambda pair: pair[0])} if state is not None else {}
+        if isinstance(broken, BaseException):
+            return [("", broken)]
+
+        def read(pairs: list) -> list[tuple[str, Any]]:
+            return [(str(getattr(item, "method", "")), item if isinstance(item, BaseException) else self._payload(getattr(item, "payload", None)))
+                    for _, item in pairs]
+
+        if watch.turn_id is None:
+            for turn_id, pairs in rows.items():
+                notes = read(pairs)
+                if _compaction_turn(notes):
+                    watch.turn_id, watch.cursor = turn_id, pairs[-1][0] + 1
+                    return notes
+            return []
+        pairs = rows.get(watch.turn_id) or []
+        if pairs:
+            watch.cursor = pairs[-1][0] + 1
+        return read(pairs)
+
+    async def _halt_compaction(self, turn_id: str | None) -> None:
+        """거둔 압축의 턴을 멈추라고 청한다. 못 해도 넘어간다(답을 오래 기다리지 않는다)."""
+        if turn_id is None or self._codex is None:
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self._request(self._codex, "turn/interrupt", {"threadId": self.session_id, "turnId": turn_id}),
+                                   COMPACT_HALT)
 
     async def account(self) -> dict[str, Any] | None:
         """계정 종류(구독 · API)와 요금제 이름만 — 값이 비밀인 것은 돌려주지 않는다."""
@@ -738,7 +881,7 @@ class CodexSession(EngineSession):
 
 class CodexEngine(Engine):
     efforts = EFFORTS + ("ultra",)
-    compacts = False
+    compacts = True             # 대화 압축을 청하고 끝을 확인한다(11-27 — CodexSession.compact)
     name = "codex"
     narrows = True
     shell = "powershell" if os.name == "nt" else "bash"      # Windows 의 Codex 는 명령을 PowerShell 로 친다(11-12 실측)

@@ -364,6 +364,7 @@ class _Worker:
     first_turn: bool = True
     compacted: bool = False         # 압축 뒤 첫 글에 인계를 읽으라는 알림을 붙인다(쉬어서 닫혀도 남는다 · 새 대화를 열면 지운다)
     compact_base: float | None = None   # 마지막 압축 바로 뒤의 문맥 토큰 — 그 대화가 이어지는 동안 든다
+    compact_base_rough: bool = False    # 그 값이 엔진이 준 「줄인 대화」의 크기다(압축 뒤의 문맥을 못 물었다) — 문맥을 처음 알 때 고쳐 잡는다
     announced: str | None = None    # session.opened 를 이미 적은 세션 id
     busy: bool = False              # 글 하나를 처리하는 중
     turning: bool = False           # 엔진의 턴이 도는 중
@@ -3256,13 +3257,16 @@ class Conductor:
             await self._after_turn(w, None)                  # 압축 뒤의 문맥 값을 다시 묻는다
             now = (w.context or {}).get("tokens")
             w.compact_base = float(now) if type(now) in (int, float) else (float(after) if type(after) in (int, float) else None)
+            w.compact_base_rough = type(now) not in (int, float) and w.compact_base is not None
             w.compacted = True                               # 다음 글에 「인계를 읽고 잇는다」를 붙인다 — 세션 기록에도 적는다
             await self._after_turn(w, None)                  # 그 바닥 값과 압축 표시까지 세션 기록에 적는다(이어 열 때 다시 본다)
             # 엔진이 주는 post_tokens 는 요약된 대화만의 크기다(진짜 세션 11-16: 2,581) — 사람에게는 지시문 · 도구까지 든
-            # 지금 문맥(25,190)을 보인다. 이벤트에는 둘 다 남긴다.
+            # 지금 문맥(25,190)을 보인다. 이벤트에는 둘 다 남긴다. 지금 문맥을 다음 턴까지 모르는 엔진(Codex — 1.14.1)은
+            # 엔진이 준 값을 「줄인 대화」의 크기라고 밝혀 적는다(지금 문맥인 것처럼 적지 않는다 — 11-27 다른 눈의 검수).
             self.store.emit("session.compacted", role=w.name, pre_tokens=before, post_tokens=after, context_tokens=now)
-            shown = now if type(now) in (int, float) else after
-            counts = (f"({int(before):,} → {int(shown):,} 토큰)"
+            known = type(now) in (int, float)
+            shown = now if known else after
+            counts = (f"({int(before):,} → {'' if known else '줄인 대화 '}{int(shown):,} 토큰)"
                       if type(before) in (int, float) and type(shown) in (int, float) else "")
             self._talk(w, "system", text=f"지휘자: 문맥이 커져 대화를 압축했다{counts} — 다음 글에서 인계를 읽고 잇는다")
             return True
@@ -3450,11 +3454,15 @@ class Conductor:
             previous = roles_mod.read_session(role) if candidate else None
             w.session, w.resumed, w.proven, w.first_turn = session, bool(candidate), False, True
             if not candidate:                    # 새 대화다 — 앞 대화의 압축 표시 · 문맥 값은 뜻이 없다
-                w.compacted, w.compact_base = False, None
+                w.compacted, w.compact_base, w.compact_base_rough = False, None, False
                 w.context = None                 # 앞 대화의 토큰 수로 막 연 대화를 압축하러 들지 않게(문맥을 못 물은 턴에 옛 값이 남았다)
             else:                                # 이어 연 대화 — 지휘자를 다시 켠 뒤에도 압축 뒤의 바닥 값과 압축 알림을 안다
                 base = (previous or {}).get("compact_base")
                 w.compact_base = float(base) if type(base) in (int, float) else None
+                # 바닥 값만 있고 문맥 값이 없는 기록은 압축 뒤의 문맥을 모른 채 닫힌 대화다 — 다음 턴에 고쳐 잡는다(표시를 따로
+                # 적지 않는다: 지휘자를 다시 켰거나 이 역할이 사이에 검토를 맡았어도 기록만으로 안다).
+                w.compact_base_rough = (w.compact_base is not None
+                                        and type((previous or {}).get("context_tokens")) not in (int, float))
                 # 압축 알림은 세션 기록에도 있다: 지휘자를 다시 켰거나, 이 역할이 사이에 검토(새 세션)를 맡아 메모리의 표시가
                 # 지워졌어도, 본 대화를 이어 열면 다음 글에 「인계를 읽고 잇는다」가 붙는다(11-16 최종 검수).
                 w.compacted = w.compacted or (previous or {}).get("compacted") is True
@@ -3777,6 +3785,22 @@ class Conductor:
             self._poke()                         # 메모리가 비기를 기다리던 줄이 다시 살펴보게
         self._touch()
 
+    def _settle_compact_base(self, w: _Worker) -> None:
+        """압축 뒤의 문맥을 못 물어 바닥 값을 엔진이 준 「줄인 대화」의 크기로 잡았으면, 문맥을 처음 안 때 한 번 고쳐 잡는다.
+
+        Codex 가 압축 턴에 알리는 크기에는 지시문 · 도구가 빠져 있다(진짜 세션 11-27: 8,438 · 다음 턴의 문맥 17,037). 그대로 두면
+        압축 뒤에도 기준 가까이 남는 대화를 그 몫만큼 일찍 — 그 몫이 기준의 COMPACT_REGROW 보다 크면 턴마다 — 다시 압축한다.
+        처음 안 문맥에는 그 턴에 새로 자란 것이 들어 있어 기준보다 높게는 잡지 않는다(그 턴에 기준을 훌쩍 넘었으면 바로 압축한다).
+        """
+        if not w.compact_base_rough:
+            return
+        tokens = (w.context or {}).get("tokens")
+        if type(tokens) not in (int, float):
+            return
+        limit = self._fresh_above((w.context or {}).get("max"))
+        w.compact_base = max(float(w.compact_base or 0.0), min(float(tokens), limit))
+        w.compact_base_rough = False
+
     async def _after_turn(self, w: _Worker, record: dict | None) -> None:
         """문맥 크기를 묻고(모델 호출 아님) 세션.json 을 고친다."""
         session = w.session
@@ -3788,6 +3812,7 @@ class Conductor:
             usage = None
         if isinstance(usage, dict):
             w.context = usage
+            self._settle_compact_base(w)
         if record is not None and record["id"] not in w.session_tasks:
             w.session_tasks = (w.session_tasks + [record["id"]])[-20:]
         try:
